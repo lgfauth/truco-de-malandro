@@ -361,8 +361,8 @@ def train_start(req: TrainStartReq):
         TRAIN.stop_flag.clear()
         TRAIN.callback = _ControlCallback(
             stop_flag=TRAIN.stop_flag,
-            eval_freq_episodes=50,
-            eval_episodes=100,
+            eval_freq_episodes=200,
+            eval_episodes=20,
         )
         TRAIN.running = True
         TRAIN.paused = False
