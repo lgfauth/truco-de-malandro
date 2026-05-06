@@ -48,26 +48,24 @@ export default function WatchPage() {
       .catch(() => {});
   }, []);
 
-  // HTTP polling fallback — always poll every 3s so status/graphs work even
-  // when the WebSocket is unavailable (Railway proxy may drop WS upgrades).
+  // HTTP polling — runs always every 3s. When WS is connected, only updates
+  // status (WS already pushes metrics). When WS is down, also accumulates metrics.
   useEffect(() => {
     const id = setInterval(() => {
-      if (!wsConnected) {
-        getTrainStatus()
-          .then((s) => {
-            setStatus(s);
-            if (s.latest_metric) {
-              setMetrics((prev) => {
-                const last = prev[prev.length - 1];
-                if (!last || last.timestep !== s.latest_metric!.timestep) {
-                  return [...prev, s.latest_metric!];
-                }
-                return prev;
-              });
-            }
-          })
-          .catch(() => {});
-      }
+      getTrainStatus()
+        .then((s) => {
+          setStatus(s);
+          if (!wsConnected && s.latest_metric) {
+            setMetrics((prev) => {
+              const last = prev[prev.length - 1];
+              if (!last || last.timestep !== s.latest_metric!.timestep) {
+                return [...prev, s.latest_metric!];
+              }
+              return prev;
+            });
+          }
+        })
+        .catch(() => {});
     }, 3000);
     return () => clearInterval(id);
   }, [wsConnected]);
