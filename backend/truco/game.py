@@ -231,6 +231,12 @@ class TrucoGame:
     # ------------------------------------------------------------------
     def _start_hand(self) -> None:
         s = self.state
+        # Guard: if a player already reached TARGET_SCORE, finalise the match
+        # instead of dealing a new hand. This handles any edge case where
+        # _finish_hand called _start_hand despite the game being over.
+        if s.scores[0] >= self.TARGET_SCORE or s.scores[1] >= self.TARGET_SCORE:
+            s.winner = Player.P0 if s.scores[0] >= self.TARGET_SCORE else Player.P1
+            return
         deck = Deck.shuffled(self._rng)
         # Deal 3 to each, then flip vira.
         p0_cards = [deck.pop(), deck.pop(), deck.pop()]
