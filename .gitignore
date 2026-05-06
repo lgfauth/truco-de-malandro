@@ -50,3 +50,8 @@ wandb/
 *.swp
 .DS_Store
 Thumbs.db
+
+# --- AI agent local memory ---
+.context-mem/
+.claude/
+.cursor/
