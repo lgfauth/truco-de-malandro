@@ -543,7 +543,7 @@ function Table({
           <Badge tone="amber" label={`Pedido: ${game.pending_stake}`} />
         )}
         {game.iron_hand && <Badge tone="rose" label="Mão de ferro" />}
-        {game.awaiting_mao11_response && (
+        {(game.awaiting_mao11_response || game.open_hand_for === 0) && (
           <Badge tone="amber" label="Mão de 11" />
         )}
         {game.vira && (
@@ -646,6 +646,11 @@ function Table({
       {game.awaiting_mao11_response && game.open_hand_for === 1 && (
         <p className="text-sm text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
           Mão de 11: o adversário tem 11 pontos e mostrou as cartas. Aceite para jogar valendo 3 pontos ou corra para ceder 1 ponto.
+        </p>
+      )}
+      {game.open_hand_for === 0 && !game.awaiting_mao11_response && (
+        <p className="text-sm text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+          Você está com 11 pontos — a IA está decidindo se aceita jogar.
         </p>
       )}
 

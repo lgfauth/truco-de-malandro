@@ -211,6 +211,13 @@ class GameSession:
         self.frozen_hand = None
         self.hand_ending = False
         self._run_ai_turns()
+        # The AI may have just decided the mão de 11 response (accept/run)
+        # and that decision might have ended the match (score reached 12).
+        # Sync session.terminated so the frontend receives the correct state.
+        g = self.env.game
+        if g.state.winner is not None and not self.terminated:
+            self.terminated = True
+            self.last_reward = 1.0 if g.state.winner == Player.P0 else -1.0
         self.last_obs = self.env._observe()
         self.last_info = self.env._info()
 
