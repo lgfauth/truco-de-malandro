@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from sb3_contrib import MaskablePPO
 
 from agent.trainer import (
+    MODELS_DIR,
     DifficultyAgent,
     EvalMetric,
     TrainingCallback,
