@@ -4,4 +4,5 @@ gymnasium
 stable-baselines3
 sb3-contrib
 numpy
-torch
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.7.0+cpu
