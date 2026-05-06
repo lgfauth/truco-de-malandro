@@ -52,6 +52,9 @@ export interface EvalMetric {
   win_rate: number;
   mean_reward: number;
   mean_steps: number;
+  entropy: number;
+  truco_rate: number;
+  run_rate: number;
 }
 
 export interface TrainStatus {

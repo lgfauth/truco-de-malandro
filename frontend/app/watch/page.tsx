@@ -154,6 +154,10 @@ export default function WatchPage() {
     timestep: m.timestep,
     win_rate: Number((m.win_rate * 100).toFixed(2)),
     mean_reward: Number(m.mean_reward.toFixed(3)),
+    mean_steps: Number(m.mean_steps.toFixed(2)),
+    entropy: Number((m.entropy ?? 0).toFixed(4)),
+    truco_rate_pct: Number(((m.truco_rate ?? 0) * 100).toFixed(2)),
+    run_rate_pct: Number(((m.run_rate ?? 0) * 100).toFixed(2)),
   }));
 
   return (
@@ -207,51 +211,18 @@ export default function WatchPage() {
         <StatusCard label="Episode" value={status?.episode ?? 0} />
       </section>
 
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <section className="grid grid-cols-2 gap-4">
         <ChartCard title="Win rate (%)">
-          <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={chartData}>
-              <CartesianGrid stroke="#27272a" strokeDasharray="3 3" />
-              <XAxis dataKey="episode" stroke="#71717a" />
-              <YAxis domain={[0, 100]} stroke="#71717a" />
-              <Tooltip
-                contentStyle={{
-                  background: "#18181b",
-                  border: "1px solid #3f3f46",
-                }}
-              />
-              <Line
-                type="monotone"
-                dataKey="win_rate"
-                stroke="#10b981"
-                strokeWidth={2}
-                dot={false}
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          <MiniChart data={chartData} dataKey="win_rate" stroke="#10b981" yDomain={[0, 100]} />
         </ChartCard>
-
-        <ChartCard title="Recompensa média">
-          <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={chartData}>
-              <CartesianGrid stroke="#27272a" strokeDasharray="3 3" />
-              <XAxis dataKey="episode" stroke="#71717a" />
-              <YAxis domain={[-1, 1]} stroke="#71717a" />
-              <Tooltip
-                contentStyle={{
-                  background: "#18181b",
-                  border: "1px solid #3f3f46",
-                }}
-              />
-              <Line
-                type="monotone"
-                dataKey="mean_reward"
-                stroke="#f59e0b"
-                strokeWidth={2}
-                dot={false}
-              />
-            </LineChart>
-          </ResponsiveContainer>
+        <ChartCard title="Steps médios">
+          <MiniChart data={chartData} dataKey="mean_steps" stroke="#3b82f6" />
+        </ChartCard>
+        <ChartCard title="Entropy da policy">
+          <MiniChart data={chartData} dataKey="entropy" stroke="#8b5cf6" />
+        </ChartCard>
+        <ChartCard title="Taxa de truco (%)">
+          <MiniChart data={chartData} dataKey="truco_rate_pct" stroke="#f59e0b" yDomain={[0, 100]} />
         </ChartCard>
       </section>
 
@@ -293,6 +264,35 @@ function StatusCard({
         {value}
       </div>
     </div>
+  );
+}
+
+function MiniChart({
+  data,
+  dataKey,
+  stroke,
+  yDomain,
+}: {
+  data: Array<Record<string, number>>;
+  dataKey: string;
+  stroke: string;
+  yDomain?: [number, number];
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={180}>
+      <LineChart data={data}>
+        <CartesianGrid stroke="#27272a" strokeDasharray="3 3" />
+        <XAxis dataKey="episode" stroke="#71717a" />
+        <YAxis domain={yDomain ?? ["auto", "auto"]} stroke="#71717a" />
+        <Tooltip
+          contentStyle={{
+            background: "#18181b",
+            border: "1px solid #3f3f46",
+          }}
+        />
+        <Line type="monotone" dataKey={dataKey} stroke={stroke} strokeWidth={2} dot={false} />
+      </LineChart>
+    </ResponsiveContainer>
   );
 }
 

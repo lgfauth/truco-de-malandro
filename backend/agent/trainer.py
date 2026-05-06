@@ -17,6 +17,8 @@ from sb3_contrib import MaskablePPO
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 
 from truco.env import (
+    ACT_CALL_TRUCO,
+    ACT_RUN,
     NUM_ACTIONS,
     NUM_CARDS,
     OBS_DIM,
@@ -180,6 +182,9 @@ class EvalMetric:
     win_rate: float
     mean_reward: float
     mean_steps: float
+    entropy: float = 0.0
+    truco_rate: float = 0.0
+    run_rate: float = 0.0
 
 
 class TrainingCallback(BaseCallback):
@@ -223,25 +228,46 @@ class TrainingCallback(BaseCallback):
         wins = 0
         rewards: List[float] = []
         steps_list: List[int] = []
+        truco_calls = 0
+        run_calls = 0
+        total_hands = 0
         for i in range(self.eval_episodes):
             env = make_env(seed=self.eval_seed + i)
             obs, info = env.reset(seed=self.eval_seed + i)
             done = False
             total_r = 0.0
             steps = 0
+            prev_hand_id = id(env.game.state.hand)
+            if env.game.state.hand is not None:
+                total_hands += 1
             while not done:
                 mask = env.action_masks()
                 action, _ = self.model.predict(
                     obs, action_masks=mask, deterministic=True
                 )
-                obs, reward, terminated, truncated, info = env.step(int(action))
+                action_int = int(action)
+                if action_int == ACT_CALL_TRUCO:
+                    truco_calls += 1
+                if action_int == ACT_RUN:
+                    run_calls += 1
+                obs, reward, terminated, truncated, info = env.step(action_int)
                 total_r += float(reward)
                 steps += 1
                 done = terminated or truncated
+                cur_hand = env.game.state.hand
+                if cur_hand is not None and id(cur_hand) != prev_hand_id:
+                    total_hands += 1
+                    prev_hand_id = id(cur_hand)
             if total_r > 0:
                 wins += 1
             rewards.append(total_r)
             steps_list.append(steps)
+
+        entropy = 0.0
+        if self.model is not None and self.model.logger is not None:
+            entropy = -float(
+                self.model.logger.name_to_value.get("train/entropy_loss", 0.0)
+            )
 
         metric = EvalMetric(
             timestep=int(self.num_timesteps),
@@ -249,6 +275,9 @@ class TrainingCallback(BaseCallback):
             win_rate=wins / self.eval_episodes,
             mean_reward=float(np.mean(rewards)),
             mean_steps=float(np.mean(steps_list)),
+            entropy=entropy,
+            truco_rate=truco_calls / max(total_hands, 1),
+            run_rate=run_calls / max(truco_calls, 1),
         )
         self.metrics.append(metric)
         if self.verbose:
