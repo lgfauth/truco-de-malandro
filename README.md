@@ -218,3 +218,8 @@ O Railway hospeda os dois serviços de forma independente a partir do mesmo repo
 - Variáveis `NEXT_PUBLIC_*` são embutidas no build do Next.js. Se a URL do backend mudar, é necessário um **redeploy do frontend**.
 - O backend armazena partidas **em memória** (dicionário Python). Reiniciar o serviço descarta partidas em andamento.
 - O treino roda em uma **thread daemon** dentro do processo do servidor. Para treinos longos, prefira um plano com mais memória ou rode o treino localmente e suba apenas os checkpoints.
+
+
+## Disclaimer
+
+- p.s.: A IA sabe roubar e blefar!
