@@ -95,11 +95,28 @@ export default function PlayPage() {
     const p0Up = game.scores.p0 > prev.scores.p0;
     const p1Up = game.scores.p1 > prev.scores.p1;
     if (p0Up || p1Up) {
+      // Prefer the frozen-hand fields on the just-ended hand (game when
+      // hand_ending=true) — they reflect the *latest* truco_caller after
+      // any raise chain. prev's snapshot can be stale when a raise was
+      // processed server-side in the same round-trip.
+      const trucoCaller = game.hand_ending && game.truco_caller != null
+        ? game.truco_caller
+        : prev.truco_caller;
+      const openHandFor = game.hand_ending && game.open_hand_for != null
+        ? game.open_hand_for
+        : prev.open_hand_for;
+
       let runner: number | null = null;
-      if (prev.pending_stake != null && prev.truco_caller != null) {
-        runner = prev.truco_caller === 0 ? 1 : 0;
-      } else if (prev.awaiting_mao11_response && prev.open_hand_for != null) {
-        runner = prev.open_hand_for === 0 ? 1 : 0;
+      if ((prev.pending_stake != null || game.hand_ending) && trucoCaller != null) {
+        // Runner = adversary of whoever called the truco most recently.
+        runner = trucoCaller === 0 ? 1 : 0;
+      } else if (
+        (prev.awaiting_mao11_response || game.hand_ending) &&
+        openHandFor != null &&
+        prev.awaiting_mao11_response
+      ) {
+        // Mão de 11: runner = responder = adversary of the player at 11.
+        runner = openHandFor === 0 ? 1 : 0;
       }
       if (runner !== null) {
         const ev = runner === 0 ? "🏃 Você correu" : "🏃 IA correu";
