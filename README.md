@@ -129,6 +129,14 @@ FastAPI exposta em `http://localhost:8000`:
 
 ---
 
+## Jogar online
+
+Acesse diretamente pelo link do Railway, sem precisar rodar nada localmente:
+
+**[https://truco-malandro.up.railway.app](https://truco-malandro.up.railway.app)**
+
+---
+
 ## Pré-requisitos
 
 ### Backend

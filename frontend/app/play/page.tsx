@@ -224,7 +224,7 @@ export default function PlayPage() {
 
   return (
     <main
-      className="min-h-screen text-zinc-100 px-6 py-8"
+      className="min-h-screen text-zinc-100 px-3 py-4 sm:px-6 sm:py-8"
       style={{
         backgroundColor: "#1a5c2a",
         backgroundImage: `
@@ -367,7 +367,7 @@ function Table({
           {handToast.message}
         </div>
       )}
-      <header className="flex flex-wrap items-center gap-4 text-sm">
+      <header className="flex flex-wrap items-center gap-2 text-xs">
         <Score label="Você (P0)" value={game.scores.p0} />
         <Score label="IA (P1)" value={game.scores.p1} />
         <Badge label={`Stake: ${game.stake ?? 1}`} />
@@ -419,16 +419,16 @@ function Table({
         <h3 className="text-xs uppercase tracking-wide text-zinc-300/70 mb-2">
           Rodadas
         </h3>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-1">
           {[0, 1, 2].map((i) => {
             const r = game.rounds?.[i];
             return (
               <div
                 key={i}
-                className="rounded-lg bg-felt-900/70 border border-emerald-950 p-3 min-h-[6rem]"
+                className="rounded-lg bg-felt-900/70 border border-emerald-950 p-2 min-h-[5rem] overflow-visible"
               >
-                <div className="text-xs text-zinc-400 mb-2">Rodada {i + 1}</div>
-                <div className="flex gap-2">
+                <div className="text-xs text-zinc-400 mb-1">Rodada {i + 1}</div>
+                <div className="flex flex-row gap-1">
                   {r?.plays.map((p, k) => (
                     <div key={k} className="flex flex-col items-center gap-1">
                       <Card card={p.card} small />
@@ -448,8 +448,8 @@ function Table({
         <h3 className="text-xs uppercase tracking-wide text-zinc-300/70 mb-2">
           Sua mão
         </h3>
-        <div className="flex gap-4">
-          <div className="flex gap-3 flex-wrap flex-1">
+        <div className="flex flex-col sm:flex-row gap-4">
+          <div className="flex flex-row gap-2 flex-nowrap flex-1 overflow-x-auto">
             {(game.p0_hand ?? []).map((c, i) => {
               const action = ACTION_PLAY_0 + i;
               const playable = legal.has(action) && !busy;
@@ -462,12 +462,12 @@ function Table({
                     playable ? "hover:-translate-y-2 cursor-pointer" : "opacity-60"
                   }`}
                 >
-                  {game.iron_hand ? <CardBack /> : <Card card={c} />}
+                  {game.iron_hand ? <CardBack small /> : <Card card={c} small />}
                 </button>
               );
             })}
           </div>
-          <div className="w-48 flex-shrink-0 h-40 overflow-y-auto bg-black/20 border border-emerald-900 rounded-lg p-2">
+          <div className="w-full sm:w-48 flex-shrink-0 h-32 sm:h-40 overflow-y-auto bg-black/20 border border-emerald-900 rounded-lg p-2">
             {events.map((e, i) => (
               <div key={i} className="text-xs text-zinc-300">{e}</div>
             ))}
@@ -515,6 +515,7 @@ function Table({
           </ActionButton>
         )}
       </section>
+
 
     </div>
   );
@@ -629,7 +630,7 @@ function ActionButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`px-4 py-2 rounded-lg font-semibold disabled:opacity-50 ${cls}`}
+      className={`text-sm px-3 py-1.5 rounded-lg font-semibold disabled:opacity-50 ${cls}`}
     >
       {children}
     </button>
