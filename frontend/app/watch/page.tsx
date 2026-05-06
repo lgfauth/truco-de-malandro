@@ -38,6 +38,7 @@ export default function WatchPage() {
   const startedAtRef = useRef<number | null>(null);
   const lastTimestepRef = useRef<number>(0);
 
+  // Initial fetch
   useEffect(() => {
     getTrainStatus()
       .then((s) => {
@@ -46,6 +47,30 @@ export default function WatchPage() {
       })
       .catch(() => {});
   }, []);
+
+  // HTTP polling fallback — always poll every 3s so status/graphs work even
+  // when the WebSocket is unavailable (Railway proxy may drop WS upgrades).
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!wsConnected) {
+        getTrainStatus()
+          .then((s) => {
+            setStatus(s);
+            if (s.latest_metric) {
+              setMetrics((prev) => {
+                const last = prev[prev.length - 1];
+                if (!last || last.timestep !== s.latest_metric!.timestep) {
+                  return [...prev, s.latest_metric!];
+                }
+                return prev;
+              });
+            }
+          })
+          .catch(() => {});
+      }
+    }, 3000);
+    return () => clearInterval(id);
+  }, [wsConnected]);
 
   useEffect(() => {
     const ws = new WebSocket(metricsWebSocketUrl());
