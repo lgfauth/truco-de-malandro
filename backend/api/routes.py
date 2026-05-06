@@ -164,42 +164,21 @@ class GameSession:
 
         current_hand = g.state.hand
         g.step(pa)
-
-        # Match ended during P0's step.
-        if g.state.winner is not None:
-            self.terminated = True
-            self.last_reward = 1.0 if g.state.winner == Player.P0 else -1.0
-            self.last_obs = self.env._observe()
-            self.last_info = self.env._info()
-            return
-
-        # P0's card ended the hand (game.py already started a new hand).
-        if g.state.hand is not current_hand:
-            self.frozen_hand = current_hand
-            self.hand_ending = True
-            self.last_obs = self.env._observe()
-            self.last_info = self.env._info()
-            return
-
-        # Hand still in progress — let the AI take its turns.
-        ai_hand = g.state.hand
+        # Always let the AI advance: it must play its leading card on a new
+        # hand started by P0's RUN/last-card step, and any pending P1 turns
+        # mid-hand. _run_ai_turns is a no-op when the game is over or it's
+        # P0's turn, so this is safe in every branch.
         self._run_ai_turns()
 
-        # Match ended during AI turns.
         if g.state.winner is not None:
             self.terminated = True
             self.last_reward = 1.0 if g.state.winner == Player.P0 else -1.0
-            self.last_obs = self.env._observe()
-            self.last_info = self.env._info()
-            return
-
-        # AI's turns ended the hand (game.py started the next one).
-        if g.state.hand is not ai_hand:
-            self.frozen_hand = ai_hand
+        elif g.state.hand is not current_hand:
+            # Hand ended (by P0's action or by an AI play). Freeze the prior
+            # hand so the frontend can render its result before /game/next-hand
+            # advances to the new one.
+            self.frozen_hand = current_hand
             self.hand_ending = True
-            self.last_obs = self.env._observe()
-            self.last_info = self.env._info()
-            return
 
         self.last_obs = self.env._observe()
         self.last_info = self.env._info()
