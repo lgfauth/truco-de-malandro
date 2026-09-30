@@ -34,6 +34,7 @@ from .encoding import (  # noqa: F401  (re-exported for callers)
 )
 from .game import Player, TrucoGame
 from .obs import DEFAULT_OBS_VERSION, obs_dim, observe
+from .seeds import TRAIN_SEED_LIMIT
 
 # Observation layout: see :mod:`truco.obs`. ``OBS_DIM`` is the v1 size used by
 # the existing checkpoints.
@@ -53,9 +54,12 @@ class TrucoEnv(gym.Env):
         super().__init__()
         self.render_mode = render_mode
         self.obs_version = obs_version
-        self._seed = seed
-        self._opp_rng = random.Random(seed)
+        # Applied on the first reset() that does not pass its own seed.
+        self._init_seed = seed
+        self._seeded = False
+        self._opp_rng = random.Random()
         self.game: Optional[TrucoGame] = None
+        self.game_seed: Optional[int] = None
 
         self.action_space = spaces.Discrete(NUM_ACTIONS)
         self.observation_space = spaces.Box(
@@ -66,11 +70,23 @@ class TrucoEnv(gym.Env):
     # Gym API
     # ------------------------------------------------------------------
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
+        """Start a new match with a fresh deal sequence.
+
+        Following the Gymnasium convention the env's RNG is seeded once (by
+        ``seed`` here or the constructor seed on the first reset) and every
+        later reset derives a new game from it. ``options={"game_seed": s}``
+        forces a specific deal sequence (used for fixed evaluation sets).
+        """
+        if seed is None and not self._seeded:
+            seed = self._init_seed
         super().reset(seed=seed)
-        if seed is not None:
-            self._seed = seed
-            self._opp_rng = random.Random(seed)
-        self.game = TrucoGame(seed=self._seed)
+        self._seeded = True
+        self._opp_rng = random.Random(int(self.np_random.integers(0, 2**63)))
+        game_seed = (options or {}).get("game_seed")
+        if game_seed is None:
+            game_seed = int(self.np_random.integers(0, TRAIN_SEED_LIMIT))
+        self.game_seed = int(game_seed)
+        self.game = TrucoGame(seed=self.game_seed)
         # If P1 leads, let it play until P0 must act.
         self._play_opponent_until_p0()
         return self._observe(), self._info()

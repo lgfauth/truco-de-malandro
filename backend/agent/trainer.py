@@ -20,6 +20,7 @@ from truco.encoding import ACT_CALL_TRUCO, ACT_RUN, action_mask, to_legal_action
 from truco.env import TrucoEnv
 from truco.game import Player
 from truco.obs import observe
+from truco.seeds import eval_game_seeds
 
 
 # --- Env factory -----------------------------------------------------------
@@ -137,6 +138,8 @@ class TrainingCallback(BaseCallback):
         self.eval_episodes = eval_episodes
         self.eval_seed = eval_seed
         self.metrics: List[EvalMetric] = []
+        # Fixed evaluation deals, disjoint from the training seed space.
+        self._eval_game_seeds = eval_game_seeds(eval_seed, eval_episodes)
         self._episode_count = 0
         self._last_eval_episode = 0
 
@@ -164,7 +167,7 @@ class TrainingCallback(BaseCallback):
         total_hands = 0
         for i in range(self.eval_episodes):
             env = make_env(seed=self.eval_seed + i)
-            obs, info = env.reset(seed=self.eval_seed + i)
+            obs, info = env.reset(options={"game_seed": self._eval_game_seeds[i]})
             done = False
             total_r = 0.0
             steps = 0

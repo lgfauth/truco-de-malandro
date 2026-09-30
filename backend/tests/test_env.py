@@ -63,13 +63,75 @@ def test_env_obs_matches_observe_for_p0():
     np.testing.assert_array_equal(obs, observe(env.game, Player.P0))
 
 
-def test_fixed_seed_repeats_the_same_deal_every_reset_CURRENT_BEHAVIOR():
-    # Documents the bug fixed in Phase 1.
+def _deals(env, n):
+    out = []
+    for _ in range(n):
+        env.reset()
+        out.append(_hand_key(env))
+    return out
+
+
+def test_consecutive_resets_deal_new_hands():
     env = TrucoEnv(seed=42)
-    env.reset()
-    first = _hand_key(env)
-    env.reset()
-    assert _hand_key(env) == first
+    deals = _deals(env, 1000)
+    assert len(set(deals)) == 1000
+
+
+def test_same_initial_seed_reproduces_the_sequence():
+    assert _deals(TrucoEnv(seed=42), 50) == _deals(TrucoEnv(seed=42), 50)
+    assert _deals(TrucoEnv(seed=42), 50) != _deals(TrucoEnv(seed=43), 50)
+
+
+def test_reset_seed_matches_constructor_seed_and_reseeds():
+    a = TrucoEnv()
+    a.reset(seed=7)
+    first = _hand_key(a)
+    rest = _deals(a, 5)
+    b = TrucoEnv(seed=7)
+    assert _deals(b, 6) == [first] + rest
+    # An explicit seed later restarts the sequence.
+    a.reset(seed=7)
+    assert _hand_key(a) == first
+
+
+def test_whole_episode_is_reproducible():
+    def trajectory(seed):
+        env = TrucoEnv(seed=seed)
+        traj = []
+        for _ in range(3):
+            obs, info = env.reset()
+            done = False
+            while not done:
+                a = info["legal_actions"][0]
+                obs, r, terminated, truncated, info = env.step(a)
+                traj.append((a, r, tuple(env.game.state.scores)))
+                done = terminated or truncated
+        return traj
+
+    assert trajectory(5) == trajectory(5)
+
+
+def test_unseeded_envs_differ():
+    assert _deals(TrucoEnv(), 5) != _deals(TrucoEnv(), 5)
+
+
+def test_training_and_eval_seed_spaces_are_disjoint():
+    from truco.seeds import eval_game_seeds, is_eval_seed
+
+    env = TrucoEnv(seed=0)
+    for _ in range(200):
+        env.reset()
+        assert not is_eval_seed(env.game_seed)
+    ev = eval_game_seeds(123, 500)
+    assert len(set(ev)) == 500 and all(is_eval_seed(s) for s in ev)
+    assert eval_game_seeds(123, 500) == ev
+
+
+def test_game_seed_option_forces_the_deal():
+    a, b = TrucoEnv(seed=1), TrucoEnv(seed=2)
+    a.reset(options={"game_seed": 99})
+    b.reset(options={"game_seed": 99})
+    assert _hand_key(a) == _hand_key(b)
 
 
 def test_first_legal_policy_always_finishes():
