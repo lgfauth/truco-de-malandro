@@ -1,8 +1,8 @@
 """Gymnasium environment wrapping :class:`TrucoGame` for single-agent RL.
 
 The learner controls P0. P1 is a uniform random policy over legal actions in
-this base environment — it will be replaced by self-play later. The episode is
-a full match (first to 12 points). Reward is sparse: +1 for winning the match,
+this base environment; league training uses :class:`agent.league.LeagueEnv`
+instead. The episode is a full match (first to 12 points). Reward is sparse: +1 for winning the match,
 -1 for losing, 0 otherwise. Illegal actions are penalized with -1 without
 advancing the underlying game.
 """

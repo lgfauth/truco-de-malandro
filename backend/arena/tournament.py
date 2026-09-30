@@ -43,7 +43,13 @@ def run_tournament(checkpoints: List[str], opponents: List[str], games: int,
 
 def _label(spec: str) -> str:
     prefix, _, arg = spec.partition(":")
-    return f"{prefix}:{Path(arg).stem}" if prefix.startswith("ppo") and arg else spec
+    if not (prefix.startswith("ppo") and arg):
+        return spec
+    path = Path(arg)
+    if path.stem in ("best", "final", "latest") or path.parent.name == "checkpoints":
+        run = path.parent.parent if path.parent.name == "checkpoints" else path.parent
+        return f"{prefix}:{run.name}/{path.stem}"
+    return f"{prefix}:{path.stem}"
 
 
 def to_markdown(t: Dict) -> str:
