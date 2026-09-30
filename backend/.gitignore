@@ -11,3 +11,6 @@ runs/
 tb_logs/
 tensorboard/
 *.log
+
+# Arena outputs (summary.json, decisions.jsonl)
+arena_results/

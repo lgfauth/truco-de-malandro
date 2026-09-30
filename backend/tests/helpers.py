@@ -60,3 +60,22 @@ def play(g: TrucoGame, idx: int = 0) -> None:
 
 def act(g: TrucoGame, t: ActionType) -> None:
     g.step(PlayerAction(t))
+
+
+class AlwaysRunPlayer:
+    """Arena plug-in used by tests: always answers 5 (run), often illegal."""
+
+    name = "always-run"
+
+    def reset(self, match_key: str) -> None:
+        pass
+
+    def decide(self, game, seat) -> int:
+        return 5
+
+
+class CrashingPlayer(AlwaysRunPlayer):
+    name = "crash"
+
+    def decide(self, game, seat) -> int:
+        raise RuntimeError("boom")
