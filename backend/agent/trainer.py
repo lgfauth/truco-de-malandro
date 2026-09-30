@@ -16,17 +16,10 @@ import numpy as np
 from sb3_contrib import MaskablePPO
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 
-from truco.env import (
-    ACT_CALL_TRUCO,
-    ACT_RUN,
-    NUM_ACTIONS,
-    NUM_CARDS,
-    OBS_DIM,
-    TrucoEnv,
-    _encode_action,
-    card_to_id,
-)
+from truco.encoding import ACT_CALL_TRUCO, ACT_RUN, action_mask, to_legal_action
+from truco.env import TrucoEnv
 from truco.game import Player
+from truco.obs import observe
 
 
 # --- Env factory -----------------------------------------------------------
@@ -35,58 +28,6 @@ def make_env(seed: Optional[int] = None) -> TrucoEnv:
 
 
 # --- Self-play env --------------------------------------------------------
-def _p1_view(env: TrucoEnv) -> tuple[np.ndarray, np.ndarray]:
-    """P1-perspective observation + action mask.
-
-    The training policy sees states from P0's perspective. To drive P1 with a
-    snapshot of that policy we present a swapped view: P1's hand goes in the
-    P0 hand slots, scores/dealer/open-hand flags flip, and the mask reflects
-    P1's legal actions. Cards on the table don't move because their identity
-    is player-independent.
-    """
-    g = env.game
-    s = g.state
-    h = s.hand
-    obs = np.zeros(OBS_DIM, dtype=np.float32)
-
-    if h is not None:
-        for i, c in enumerate(h.hands[Player.P1][:3]):
-            obs[i] = (card_to_id(c) + 1) / NUM_CARDS
-        obs[3] = (card_to_id(h.vira) + 1) / NUM_CARDS
-        slot = 4
-        for r in range(3):
-            if r < len(h.rounds):
-                plays = h.rounds[r].plays
-                for k in range(2):
-                    if k < len(plays):
-                        _, card = plays[k]
-                        obs[slot] = (card_to_id(card) + 1) / NUM_CARDS
-                    slot += 1
-            else:
-                slot += 2
-        obs[12] = h.stake / 12.0
-        obs[13] = (h.pending_stake or 0) / 12.0
-        obs[14] = 1.0 if h.pending_stake is not None else 0.0
-        obs[16] = 1.0 if h.awaiting_mao11_response else 0.0
-        obs[19] = 1.0 if h.current_player == Player.P1 else 0.0
-        if s.open_hand_for == Player.P0:
-            for i, c in enumerate(h.hands[Player.P0][:3]):
-                obs[21 + i] = (card_to_id(c) + 1) / NUM_CARDS
-
-    obs[10] = s.scores[1] / TrucoEnv.TARGET_SCORE
-    obs[11] = s.scores[0] / TrucoEnv.TARGET_SCORE
-    obs[15] = 1.0 if s.iron_hand else 0.0
-    obs[17] = 1.0 if s.open_hand_for == Player.P1 else 0.0
-    obs[18] = 1.0 if s.open_hand_for == Player.P0 else 0.0
-    obs[20] = 1.0 if s.dealer == Player.P1 else 0.0
-
-    mask = np.zeros(NUM_ACTIONS, dtype=np.int8)
-    if h is not None and h.current_player == Player.P1:
-        for la in g.legal_actions():
-            mask[_encode_action(la)] = 1
-    return obs, mask
-
-
 class SelfPlayEnv(TrucoEnv):
     """TrucoEnv where P1 is driven by a frozen snapshot of the training policy.
 
@@ -105,8 +46,6 @@ class SelfPlayEnv(TrucoEnv):
         self.frozen_model = model
 
     def _play_opponent_until_p0(self) -> None:
-        from truco.env import _decode_action  # local import keeps top tidy
-
         g = self.game
         while (
             g.state.winner is None
@@ -120,20 +59,12 @@ class SelfPlayEnv(TrucoEnv):
             if self.frozen_model is None:
                 pa = self._opp_rng.choice(legal)
             else:
-                obs, mask = _p1_view(self)
                 action_arr, _ = self.frozen_model.predict(
-                    obs, action_masks=mask, deterministic=False
+                    observe(g, Player.P1, self.obs_version),
+                    action_masks=action_mask(g, Player.P1),
+                    deterministic=False,
                 )
-                action_id = int(np.asarray(action_arr).item())
-                try:
-                    pa = _decode_action(action_id)
-                except ValueError:
-                    pa = legal[0]
-                if not any(
-                    la.type == pa.type and la.card_index == pa.card_index
-                    for la in legal
-                ):
-                    pa = legal[0]
+                pa, _ = to_legal_action(g, int(np.asarray(action_arr).item()))
             g.step(pa)
 
 

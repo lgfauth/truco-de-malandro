@@ -20,7 +20,6 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
 
-import numpy as np
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from sb3_contrib import MaskablePPO
@@ -33,8 +32,10 @@ from agent.trainer import (
     get_difficulty_agent,
     train,
 )
-from truco.env import NUM_ACTIONS, TrucoEnv
+from truco.encoding import action_mask, actions_equal, decode_action, to_legal_action
+from truco.env import TrucoEnv
 from truco.game import Player
+from truco.obs import observe
 
 
 router = APIRouter()
@@ -129,20 +130,11 @@ class GameSession:
             and g.state.hand is not None
             and g.state.hand.current_player == Player.P1
         ):
-            obs, mask = _p1_view(self.env)
-            action = self.agent.predict(obs, mask)
-            # Validate against the game's legal actions; fall back to first
-            # legal id if the model returns something illegal (can happen if
-            # the loaded model wasn't trained with masking).
-            from truco.env import _decode_action  # local import to avoid cycle
-            legal_actions = g.legal_actions()
-            try:
-                pa = _decode_action(int(action))
-            except ValueError:
-                pa = legal_actions[0]
-            if not any(la.type == pa.type and la.card_index == pa.card_index
-                       for la in legal_actions):
-                pa = legal_actions[0]
+            action = self.agent.predict(observe(g, Player.P1),
+                                        action_mask(g, Player.P1))
+            # Fall back to the first legal action if the model returns
+            # something illegal (e.g. a checkpoint trained without masking).
+            pa, _ = to_legal_action(g, int(action))
             g.step(pa)
 
     def step_human(self, action: int) -> None:
@@ -150,16 +142,17 @@ class GameSession:
             raise HTTPException(400, "Game is over.")
         if self.hand_ending:
             raise HTTPException(400, "Hand ended — call /game/next-hand first.")
-        # Apply P0's action via the env, but bypass the env's internal random
-        # opponent loop by using a fresh env step path. We do it manually:
-        from truco.env import _decode_action
+        # Apply P0's action directly on the game, bypassing the env's internal
+        # random opponent loop.
         g = self.env.game
         if g.state.hand is None or g.state.hand.current_player != Player.P0:
             raise HTTPException(400, "Not P0's turn.")
         legal = g.legal_actions()
-        pa = _decode_action(int(action))
-        if not any(la.type == pa.type and la.card_index == pa.card_index
-                   for la in legal):
+        try:
+            pa = decode_action(int(action))
+        except ValueError:
+            raise HTTPException(400, "Illegal action for current state.")
+        if not any(actions_equal(pa, la) for la in legal):
             raise HTTPException(400, "Illegal action for current state.")
 
         current_hand = g.state.hand
@@ -199,60 +192,6 @@ class GameSession:
             self.last_reward = 1.0 if g.state.winner == Player.P0 else -1.0
         self.last_obs = self.env._observe()
         self.last_info = self.env._info()
-
-
-def _p1_view(env: TrucoEnv) -> tuple[np.ndarray, np.ndarray]:
-    """Build an observation as if P1 were the learner.
-
-    The model was trained from P0's perspective; to drive P1 we present a
-    swapped view of the state. Card encodings are identical regardless of
-    player; only player-relative fields are flipped.
-    """
-    from truco.env import card_to_id, NUM_CARDS, OBS_DIM
-
-    g = env.game
-    s = g.state
-    h = s.hand
-    obs = np.zeros(OBS_DIM, dtype=np.float32)
-
-    if h is not None:
-        for i, c in enumerate(h.hands[Player.P1][:3]):
-            obs[i] = (card_to_id(c) + 1) / NUM_CARDS
-        obs[3] = (card_to_id(h.vira) + 1) / NUM_CARDS
-        slot = 4
-        for r in range(3):
-            if r < len(h.rounds):
-                plays = h.rounds[r].plays
-                for k in range(2):
-                    if k < len(plays):
-                        _, card = plays[k]
-                        obs[slot] = (card_to_id(card) + 1) / NUM_CARDS
-                    slot += 1
-            else:
-                slot += 2
-        obs[12] = h.stake / 12.0
-        obs[13] = (h.pending_stake or 0) / 12.0
-        obs[14] = 1.0 if h.pending_stake is not None else 0.0
-        obs[16] = 1.0 if h.awaiting_mao11_response else 0.0
-        obs[19] = 1.0 if h.current_player == Player.P1 else 0.0
-        if s.open_hand_for == Player.P0:  # swapped: P0's cards now visible to P1
-            for i, c in enumerate(h.hands[Player.P0][:3]):
-                obs[21 + i] = (card_to_id(c) + 1) / NUM_CARDS
-
-    obs[10] = s.scores[1] / TrucoEnv.TARGET_SCORE
-    obs[11] = s.scores[0] / TrucoEnv.TARGET_SCORE
-    obs[15] = 1.0 if s.iron_hand else 0.0
-    obs[17] = 1.0 if s.open_hand_for == Player.P1 else 0.0
-    obs[18] = 1.0 if s.open_hand_for == Player.P0 else 0.0
-    obs[20] = 1.0 if s.dealer == Player.P1 else 0.0
-
-    # Build an action mask for P1 from the game's legal actions.
-    from truco.env import _encode_action
-    mask = np.zeros(NUM_ACTIONS, dtype=np.int8)
-    if h is not None and h.current_player == Player.P1:
-        for la in g.legal_actions():
-            mask[_encode_action(la)] = 1
-    return obs, mask
 
 
 GAMES: dict[str, GameSession] = {}
