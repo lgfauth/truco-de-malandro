@@ -347,6 +347,8 @@ def main(argv=None) -> int:
     p.add_argument("--n-envs", type=int, default=None)
     p.add_argument("--vec-env", default=d.vec_env, choices=["subproc", "dummy"])
     p.add_argument("--init-from", default="")
+    p.add_argument("--hp", action="append", default=[], metavar="KEY=VALUE",
+                   help="override a HYPERPARAMS entry, e.g. --hp ent_coef=0.01 (repeatable)")
     args = p.parse_args(argv)
 
     cfg = TrainConfig(
@@ -360,6 +362,11 @@ def main(argv=None) -> int:
         cfg.league = _parse_league(args.league)
     if args.n_envs:
         cfg.hyperparams["n_envs"] = args.n_envs
+    for item in args.hp:
+        key, _, value = item.partition("=")
+        if key not in cfg.hyperparams:
+            p.error(f"unknown hyperparameter: {key}")
+        cfg.hyperparams[key] = json.loads(value)
 
     def report(m: Dict[str, Any]) -> None:
         ev = "  ".join(f"{k}={v['win_rate']:.1%}" for k, v in m["eval"].items())
