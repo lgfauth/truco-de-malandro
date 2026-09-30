@@ -8,3 +8,43 @@ body {
   color: #f4f4f5;
   min-height: 100%;
 }
+
+/* --- Play table ------------------------------------------------------------ */
+/* Felt background: plain gradients only (no SVG noise / fixed attachment, which
+   are expensive to repaint on phones). */
+.felt-bg {
+  background-color: #14532d;
+  background-image: radial-gradient(ellipse at 50% 40%, #1e6b30 0%, #124a24 55%, #0b3319 100%);
+}
+
+/* Full-height game screen that never scrolls on phones. */
+.game-screen {
+  height: 100vh;
+  height: 100dvh;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Playing cards scale with both viewport width and height, so three cards
+   always fit across and the whole table fits vertically. Text inside uses
+   container units (cqw) so it scales with the card. */
+.pcard {
+  aspect-ratio: 5 / 7;
+  container-type: inline-size;
+  flex-shrink: 0;
+}
+.pcard-hand  { width: min(29vw, calc(22vh * 0.714), 150px); width: min(29vw, calc(22dvh * 0.714), 150px); }
+.pcard-table { width: min(28vw, calc(24vh * 0.714), 140px); width: min(28vw, calc(24dvh * 0.714), 140px); }
+.pcard-vira  { width: min(15vw, calc(12vh * 0.714), 76px);  width: min(15vw, calc(12dvh * 0.714), 76px); }
+.pcard-back  { width: min(11vw, calc(8vh * 0.714), 52px);   width: min(11vw, calc(8dvh * 0.714), 52px); }
+.pcard-mini  { width: 38px; }
+
+@keyframes card-in {
+  from { transform: translateY(12px) scale(0.92); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+.card-in { animation: card-in 180ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .card-in { animation: none; }
+}
