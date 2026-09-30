@@ -292,12 +292,14 @@ Taxa de vitória do jogador da linha, com IC 95%. Os números usam 1000 partidas
 | liga v1 (`ent_coef=0.05`), best em 1,2M | 67,8% [65–71] | **61,2%** [58–64] | 64,1% [61–67] | 50% | 42,0% [39–45] |
 | liga v2 (`ent_coef=0.05`), best em 600k | 69,8% [67–73] | 39,1% [36–42] | 60,5% [57–63] | 52,5% [49–56] | 46,1% [43–49] |
 | liga v2 (`ent_coef=0.01`), best em 1,3M = **`truco_liga_v2` (produção)** | **76,5%** [74–79] | 48,9% [46–52] | **67,0%** [64–70] | **58,0%** [55–61] | 50% |
+| liga v1 (`ent_coef=0.01`), best em 400k | 67,5% [65–70] | 56,7% [54–60] | 60,3% [57–63] | 43,2% [40–46] | 41,5% [38–45] |
 
 ¹ `--seed 123`.
 
 Leitura:
 - A correção da semente mais o treino em liga levam todos os modelos novos acima do PPO 1M, com folga contra a regra (de 24% para 39–61%).
 - Com `ent_coef=0.05`, a entropia fica perto de 0,7 durante todo o treino e o desempenho estaciona cedo. Com `0.01`, a v2 é a mais forte no geral: vence o PPO 1M, a liga v1 e o aleatório com margem.
+- Com `ent_coef=0.01` nos dois, a observação v2 vence a v1 no confronto direto (58,5%). Baixar a entropia ajudou a v2, mas não a v1. Todas as runs usam uma única semente de treino, então diferenças de poucos pontos não são conclusivas.
 - As forças não são transitivas: a liga v1 é a que mais bate a regra, mas perde o confronto direto para a v2 com `0.01`. Por isso a avaliação usa vários oponentes e o Elo da página da run.
 
 ## Disclaimer
