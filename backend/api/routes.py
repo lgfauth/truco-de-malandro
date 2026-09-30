@@ -276,8 +276,9 @@ class TrainStartReq(BaseModel):
 
 
 class NewGameReq(BaseModel):
-    # Level (facil | medio | impossivel), "random", "rule" or a checkpoint
-    # reference such as "ppo:models/truco_ppo_1M.zip". Default: impossivel.
+    # Level (facil | medio | dificil | impossivel), "random", "rule" or a
+    # checkpoint reference such as "ppo:models/truco_liga_v2.zip".
+    # Default: impossivel.
     opponent: Optional[str] = None
 
 

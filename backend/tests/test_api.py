@@ -43,7 +43,7 @@ def test_health(client):
 def test_full_game_against_default_model(client):
     state = client.post("/game/new").json()
     assert state["legal_actions"]
-    assert state["opponent"]["ref"] == "ppo:models/truco_ppo_1M.zip"
+    assert state["opponent"]["ref"] == "ppo:models/truco_liga_v2.zip"
     state = _play_out(client, state)
     assert state["match_winner"] in (0, 1)
     assert max(state["scores"]["p0"], state["scores"]["p1"]) >= 12
@@ -54,10 +54,11 @@ def test_full_game_against_default_model(client):
 
 def test_empty_body_keeps_the_default_opponent(client):
     state = client.post("/game/new", json={}).json()
-    assert state["opponent"]["ref"] == "ppo:models/truco_ppo_1M.zip"
+    assert state["opponent"]["ref"] == "ppo:models/truco_liga_v2.zip"
 
 
-@pytest.mark.parametrize("opponent", ["facil", "medio", "rule", "ppo:models/truco_ppo_1M.zip"])
+@pytest.mark.parametrize("opponent", ["facil", "medio", "dificil", "rule",
+                                      "ppo:models/truco_ppo_1M.zip"])
 def test_game_against_selected_opponent(client, opponent):
     state = client.post("/game/new", json={"opponent": opponent}).json()
     state = _play_out(client, state)

@@ -24,7 +24,9 @@ HYPERPARAMS: Dict[str, Any] = {
     "gamma": 0.99,
     "gae_lambda": 0.95,
     "clip_range": 0.2,
-    "ent_coef": 0.05,          # keeps exploration alive with sparse rewards
+    # 0.05 kept entropy near 0.7 for a whole 3M run and the policy plateaued
+    # early; 0.01 trained the strongest model so far (see README results).
+    "ent_coef": 0.01,
     "vf_coef": 0.5,
     "max_grad_norm": 0.5,
     "normalize_advantage": True,

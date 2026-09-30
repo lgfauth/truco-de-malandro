@@ -3,7 +3,7 @@
 Clients never send file paths or ``py:`` specs (those could import arbitrary
 code). They send one of:
 
-    a level name          facil | medio | impossivel
+    a level name          facil | medio | dificil | impossivel
     random | rule
     ppo:models/<file>.zip                 a deployed checkpoint
     ppo:runs/<run_id>/<file>.zip          a run's best/final/latest
@@ -25,11 +25,12 @@ from agent.league import CHECKPOINTS_DIR
 from agent.train import RUNS_DIR
 from arena.players import MODELS_DIR
 
-# Level name -> (spec, label). "impossivel" is today's default opponent.
+# Level name -> (spec, label). "impossivel" is the default opponent.
 LEVELS: Dict[str, Tuple[str, str]] = {
     "facil": ("random", "Fácil — joga ao acaso"),
     "medio": ("rule", "Médio — regras simples"),
-    "impossivel": ("ppo:models/truco_ppo_1M.zip", "Impossível — PPO 1M"),
+    "dificil": ("ppo:models/truco_ppo_1M.zip", "Difícil — PPO 1M (modelo anterior)"),
+    "impossivel": ("ppo:models/truco_liga_v2.zip", "Impossível — PPO liga v2"),
 }
 DEFAULT_OPPONENT = "impossivel"
 

@@ -70,7 +70,7 @@ export default function ArenaPage() {
     getArenaPlayers()
       .then((p) => {
         setPlayers(p);
-        setA((cur) => cur || p.models.find((m) => m.ref.includes("truco_ppo_1M"))?.ref || p.builtin[0]);
+        setA((cur) => cur || p.models.find((m) => m.ref.includes("truco_liga_v2"))?.ref || p.builtin[0]);
       })
       .catch((e) => setError((e as Error).message));
     loadJobs();

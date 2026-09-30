@@ -28,7 +28,6 @@ truco-de-malandro/
 │   ├── requirements.txt        # Dependências de produção
 │   ├── requirements-dev.txt    # + pytest/httpx
 │   ├── pytest.ini
-│   ├── train_all.py            # Script legado que gerou truco_ppo_1M (não usar para treinos novos)
 │   ├── truco/
 │   │   ├── game.py             # Motor de regras puro (TrucoGame)
 │   │   ├── encoding.py         # Cartas <-> ids, ações 0..6, máscara, fallback legal
@@ -38,8 +37,7 @@ truco-de-malandro/
 │   ├── agent/
 │   │   ├── config.py           # HYPERPARAMS e TrainConfig (fonte única)
 │   │   ├── league.py           # LeagueEnv e pool de oponentes
-│   │   ├── train.py            # python -m agent.train (runs/<id>/)
-│   │   └── trainer.py          # Pipeline legado (train_all.py)
+│   │   └── train.py            # python -m agent.train (runs/<id>/)
 │   ├── arena/
 │   │   ├── players.py          # ArenaPlayer, RandomPlayer, RulePlayer, PPOPlayer, registro de specs
 │   │   ├── match.py            # Uma partida + estatísticas + log
@@ -52,7 +50,7 @@ truco-de-malandro/
 │   │   ├── runs.py             # /runs/*
 │   │   ├── arena_jobs.py       # /arena/*
 │   │   └── players.py          # Níveis e validação das referências de jogador
-│   ├── models/                 # Checkpoints publicados (truco_ppo_1M.zip é o de produção)
+│   ├── models/                 # Checkpoints publicados (truco_liga_v2.zip é o de produção)
 │   └── tests/                  # pytest
 └── frontend/
     ├── app/                    # /, /play, /watch, /runs, /runs/[id], /arena
@@ -90,7 +88,7 @@ O `PPOPlayer` detecta a versão pelo tamanho da entrada do modelo, então checkp
 
 ### Hiperparâmetros
 
-Ficam num único dict, `HYPERPARAMS` em [`backend/agent/config.py`](backend/agent/config.py). Cada run grava os valores efetivos em `runs/<id>/config.json`. Um rollout junta `n_envs × n_steps` = 8 × 256 = 2048 transições (cerca de 110 partidas), com `batch_size=128`. O `truco_ppo_1M` foi treinado com a configuração antiga (`n_steps=512`, `batch_size=32`, um env, só contra o aleatório), que continua gravada dentro do zip.
+Ficam num único dict, `HYPERPARAMS` em [`backend/agent/config.py`](backend/agent/config.py). Cada run grava os valores efetivos em `runs/<id>/config.json`. Um rollout junta `n_envs × n_steps` = 8 × 256 = 2048 transições (cerca de 110 partidas), com `batch_size=128` e `ent_coef=0.01`. O `truco_ppo_1M` foi treinado com a configuração antiga (`n_steps=512`, `batch_size=32`, um env, só contra o aleatório), que continua gravada dentro do zip.
 
 ### Treino em liga
 
@@ -118,7 +116,7 @@ Cada execução cria `runs/<data>-<nome>/`:
 | `checkpoints/step_*.zip` | snapshots (também o pool da liga) |
 | `best.zip`, `final.zip`, `latest.zip` | melhor pela avaliação, último, pesos do oponente "mais recente" |
 
-Para publicar um modelo no jogo, copie o zip para `backend/models/` e escolha-o no seletor de oponente. Para trocar o default, altere `LEVELS["impossivel"]` em `backend/api/players.py`.
+O modelo de produção, `models/truco_liga_v2.zip`, é o `best.zip` da run `liga_v2_ent001_3M` (observação v2, `ent_coef=0.01`, melhor checkpoint em 1,3M passos). Para publicar outro, copie o zip para `backend/models/`: ele aparece no seletor de oponente. Para trocar o default, altere `LEVELS["impossivel"]` em `backend/api/players.py`.
 
 ---
 
@@ -183,7 +181,7 @@ Estão em `tests/test_arena.py`: aleatório contra aleatório fica perto de 50%,
 
 | Método | Endpoint | Descrição |
 |---|---|---|
-| `POST` | `/game/new` | `{ opponent? }`: nível (`facil`, `medio`, `impossivel`), `random`, `rule` ou `ppo:models/<zip>` / `ppo:runs/<id>/<zip>`; default `impossivel` (= `truco_ppo_1M`) |
+| `POST` | `/game/new` | `{ opponent? }`: nível (`facil` = aleatório, `medio` = regra, `dificil` = `truco_ppo_1M`, `impossivel` = `truco_liga_v2`), `random`, `rule` ou `ppo:models/<zip>` / `ppo:runs/<id>/<zip>`; default `impossivel` |
 | `POST` | `/game/action` | `{ game_id, action: 0–6 }`; executa a ação do humano e os turnos da IA |
 | `GET` | `/game/state?game_id=` | Estado atual. Inclui `opponent`, `stats` (trucos, aumentos, aceites e corridas por lado) e `p1_cards_left`. As cartas da IA nunca são enviadas |
 | `POST` | `/game/next-hand` | Avança após `hand_ending=true` |
@@ -290,10 +288,10 @@ Taxa de vitória do jogador da linha, com IC 95%. Os números usam 1000 partidas
 | Jogador | vs Aleatório | vs Regra | vs PPO 1M | vs liga v1 | vs liga v2 ent 0.01 |
 |---|---|---|---|---|---|
 | Regra | 83,5%¹ | — | 75,8% [73–78] | — | — |
-| PPO 1M (produção, v1, só contra aleatório) | 66,1% [63–69] | 24,2% [22–27] | 50% | 35,9% [33–39] | 33,0% [30–36] |
+| PPO 1M (modelo anterior, v1, só contra aleatório) | 66,1% [63–69] | 24,2% [22–27] | 50% | 35,9% [33–39] | 33,0% [30–36] |
 | liga v1 (`ent_coef=0.05`), best em 1,2M | 67,8% [65–71] | **61,2%** [58–64] | 64,1% [61–67] | 50% | 42,0% [39–45] |
 | liga v2 (`ent_coef=0.05`), best em 600k | 69,8% [67–73] | 39,1% [36–42] | 60,5% [57–63] | 52,5% [49–56] | 46,1% [43–49] |
-| liga v2 (`ent_coef=0.01`), best em 1,3M | **76,5%** [74–79] | 48,9% [46–52] | **67,0%** [64–70] | **58,0%** [55–61] | 50% |
+| liga v2 (`ent_coef=0.01`), best em 1,3M = **`truco_liga_v2` (produção)** | **76,5%** [74–79] | 48,9% [46–52] | **67,0%** [64–70] | **58,0%** [55–61] | 50% |
 
 ¹ `--seed 123`.
 

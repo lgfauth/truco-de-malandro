@@ -314,7 +314,7 @@ export default function PlayPage() {
                       ))}
                     </>
                   ) : (
-                    <option value="impossivel">Impossível — PPO 1M</option>
+                    <option value="impossivel">Impossível — PPO liga v2</option>
                   )}
                 </select>
               </label>
