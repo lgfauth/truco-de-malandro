@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import Executor, ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -29,6 +29,10 @@ def _worker_init() -> None:
         torch.set_num_threads(1)
     except ImportError:
         pass
+
+
+def make_executor(workers: int) -> ProcessPoolExecutor:
+    return ProcessPoolExecutor(max_workers=workers, initializer=_worker_init)
 
 
 def _get_player(spec: str) -> ArenaPlayer:
@@ -57,11 +61,12 @@ def _jobs(games: int, seed: int) -> List[Tuple[int, int]]:
 def run_matchup(spec_a: str, spec_b: str, games: int = 1000, seed: int = 123,
                 workers: Optional[int] = None, log_path: Optional[Path] = None,
                 progress: Optional[ProgressFn] = None,
-                chunk_size: int = 50) -> Dict:
+                chunk_size: int = 50, executor: Optional[Executor] = None) -> Dict:
     """Play ``games`` matches of ``spec_a`` vs ``spec_b`` and summarize.
 
     Deals come from the evaluation seed space, so they never overlap with
-    training. Results are identical for any ``workers`` value.
+    training. Results are identical for any ``workers`` value. Pass an
+    ``executor`` (see :func:`make_executor`) to reuse worker processes.
     """
     jobs = _jobs(games, seed)
     workers = workers if workers is not None else min(8, os.cpu_count() or 1)
@@ -71,14 +76,15 @@ def run_matchup(spec_a: str, spec_b: str, games: int = 1000, seed: int = 123,
     t0 = time.time()
     done = 0
 
-    if workers <= 1:
+    if workers <= 1 and executor is None:
         for i, chunk in enumerate(chunks):
             by_chunk[i] = _play_chunk(spec_a, spec_b, chunk, with_log)
             done += len(chunk)
             if progress:
                 progress(done, len(jobs))
     else:
-        with ProcessPoolExecutor(max_workers=workers, initializer=_worker_init) as pool:
+        pool = executor or make_executor(workers)
+        try:
             futures = {pool.submit(_play_chunk, spec_a, spec_b, chunk, with_log): i
                        for i, chunk in enumerate(chunks)}
             for fut in as_completed(futures):
@@ -87,6 +93,9 @@ def run_matchup(spec_a: str, spec_b: str, games: int = 1000, seed: int = 123,
                 done += len(chunks[i])
                 if progress:
                     progress(done, len(jobs))
+        finally:
+            if executor is None:
+                pool.shutdown()
 
     results: List[MatchResult] = []
     for i in range(len(chunks)):

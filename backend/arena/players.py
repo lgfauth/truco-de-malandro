@@ -164,15 +164,22 @@ class PPOPlayer(ArenaPlayer):
     """A MaskablePPO checkpoint. The observation version follows the model."""
 
     def __init__(self, checkpoint: str | Path, deterministic: bool = True,
-                 model=None) -> None:
+                 model=None, reseed: bool = True) -> None:
+        """``model`` skips loading (the path is then only a label).
+
+        ``reseed`` makes stochastic play reproducible per match by reseeding
+        torch's global RNG; turn it off when sharing a process with a model
+        that is being trained.
+        """
         self.path = resolve_checkpoint(str(checkpoint)) if model is None else Path(str(checkpoint))
         self.model = model if model is not None else load_ppo(self.path)
         self.obs_version = version_for_dim(int(self.model.observation_space.shape[0]))
         self.deterministic = deterministic
+        self.reseed = reseed
         self.name = f"ppo:{self.path.stem}" + ("" if deterministic else ":stoch")
 
     def reset(self, match_key: str) -> None:
-        if not self.deterministic:
+        if not self.deterministic and self.reseed:
             # SB3 samples through torch's global RNG.
             import torch
 
