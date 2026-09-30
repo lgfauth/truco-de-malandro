@@ -31,7 +31,7 @@ const RANK_LABEL: Record<number, string> = {
   14: "2", 15: "3",
 };
 
-type HandToast = { message: string; tone: "win" | "lose" };
+type HandToast = { message: string; tone: "win" | "lose" | "draw" };
 
 export default function PlayPage() {
   const [game, setGame] = useState<GameStateDTO | null>(null);
@@ -102,21 +102,17 @@ export default function PlayPage() {
       const trucoCaller = game.hand_ending && game.truco_caller != null
         ? game.truco_caller
         : prev.truco_caller;
-      const openHandFor = game.hand_ending && game.open_hand_for != null
-        ? game.open_hand_for
-        : prev.open_hand_for;
+      const mao11Player = game.hand_ending && game.mao11_player != null
+        ? game.mao11_player
+        : prev.mao11_player;
 
       let runner: number | null = null;
       if ((prev.pending_stake != null || game.hand_ending) && trucoCaller != null) {
         // Runner = adversary of whoever called the truco most recently.
         runner = trucoCaller === 0 ? 1 : 0;
-      } else if (
-        (prev.awaiting_mao11_response || game.hand_ending) &&
-        openHandFor != null &&
-        prev.awaiting_mao11_response
-      ) {
-        // Mão de 11: runner = responder = adversary of the player at 11.
-        runner = openHandFor === 0 ? 1 : 0;
+      } else if (prev.awaiting_mao11_response && mao11Player != null) {
+        // Mão de 11: only the player at 11 can run.
+        runner = mao11Player;
       }
       if (runner !== null) {
         const ev = runner === 0 ? "🏃 Você correu" : "🏃 IA correu";
@@ -156,11 +152,16 @@ export default function PlayPage() {
     const winner = game.hand_winner;
     const p0Won = winner === 0;
     setFrozenGame(game);
-    setHandToast({
-      message: p0Won ? "Você venceu a mão! 🎉" : "IA venceu a mão.",
-      tone: p0Won ? "win" : "lose",
-    });
-    if (p0Won) sounds.playRoundWin(); else sounds.playRoundLose();
+    if (game.hand_drawn) {
+      setHandToast({ message: "Mão empatada — ninguém pontua.", tone: "draw" });
+      sounds.playRoundTie();
+    } else {
+      setHandToast({
+        message: p0Won ? "Você venceu a mão! 🎉" : "IA venceu a mão.",
+        tone: p0Won ? "win" : "lose",
+      });
+      if (p0Won) sounds.playRoundWin(); else sounds.playRoundLose();
+    }
     const id = setTimeout(async () => {
       try {
         const next = await nextHand(game.game_id);
@@ -447,7 +448,7 @@ function RulesModal({ onClose }: { onClose: () => void }) {
         <section>
           <h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-400 mb-1">Mão de 11</h3>
           <p className="text-sm text-zinc-300 mb-3">
-            Quando um jogador chega a 11 pontos, ele mostra as cartas ao adversário. O adversário decide: aceitar (joga valendo 3) ou correr (cede 1 ponto).
+            Quando um jogador chega a 11 pontos, ele olha as próprias cartas e decide antes de jogar: aceitar (a mão vale 3) ou correr (o adversário ganha 1 ponto). Não se pode pedir truco nessa mão.
           </p>
           <svg width={260} height={80} viewBox="0 0 260 80" className="block">
             <SvgCard rank="A" suit="♠" x={0} y={10} />
@@ -542,6 +543,8 @@ function Table({
   const handToastTone =
     handToast?.tone === "win"
       ? "bg-emerald-700/90 border-emerald-400 text-emerald-50"
+      : handToast?.tone === "draw"
+      ? "bg-zinc-700/90 border-zinc-400 text-zinc-50"
       : "bg-rose-800/90 border-rose-400 text-rose-50";
   return (
     <div className="relative rounded-2xl border border-emerald-900 bg-felt-800/60 p-6 shadow-inner space-y-6">
@@ -560,7 +563,7 @@ function Table({
           <Badge tone="amber" label={`Pedido: ${game.pending_stake}`} />
         )}
         {game.iron_hand && <Badge tone="rose" label="Mão de ferro" />}
-        {(game.awaiting_mao11_response || game.open_hand_for === 0) && (
+        {game.mao11_player != null && (
           <Badge tone="amber" label="Mão de 11" />
         )}
         {game.vira && (
@@ -574,7 +577,7 @@ function Table({
       <section>
         <h3 className="text-xs uppercase tracking-wide text-zinc-300/70 mb-2 flex items-center gap-2">
           Mão da IA
-          {game.open_hand_for === 1 && (
+          {game.mao11_player === 1 && (
             <span className="px-1.5 py-0.5 text-[10px] uppercase rounded bg-amber-700/70 border border-amber-500 text-amber-50">
               Mão de 11
             </span>
@@ -582,11 +585,6 @@ function Table({
         </h3>
         <div className="flex gap-2">
           {(() => {
-            if (game.open_hand_for === 1) {
-              return (game.p1_hand ?? []).map((c, i) => (
-                <Card key={i} card={c} small />
-              ));
-            }
             const played = (game.rounds ?? []).reduce(
               (acc, r) =>
                 acc + r.plays.filter((p) => p.player === 1).length,
@@ -660,14 +658,14 @@ function Table({
         </div>
       </section>
 
-      {game.awaiting_mao11_response && game.open_hand_for === 1 && (
+      {game.awaiting_mao11_response && game.mao11_player === 0 && (
         <p className="text-sm text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
-          Mão de 11: o adversário tem 11 pontos e mostrou as cartas. Aceite para jogar valendo 3 pontos ou corra para ceder 1 ponto.
+          Mão de 11: você está com 11 pontos. Olhe suas cartas e decida: aceite para jogar valendo 3 pontos ou corra e a IA ganha 1 ponto.
         </p>
       )}
-      {game.open_hand_for === 0 && !game.awaiting_mao11_response && (
+      {game.mao11_player === 1 && !game.awaiting_mao11_response && (
         <p className="text-sm text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
-          Você está com 11 pontos — a IA está decidindo se aceita jogar.
+          Mão de 11: a IA está com 11 pontos e decidiu jogar — a mão vale 3.
         </p>
       )}
 

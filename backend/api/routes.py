@@ -217,7 +217,7 @@ def _serialize_game(session: GameSession) -> dict:
         "scores": {"p0": s.scores[0], "p1": s.scores[1]},
         "dealer": int(s.dealer),
         "iron_hand": s.iron_hand,
-        "open_hand_for": None if s.open_hand_for is None else int(s.open_hand_for),
+        "mao11_player": None if s.mao11_player is None else int(s.mao11_player),
         "match_winner": None if s.winner is None else int(s.winner),
         "terminated": session.terminated,
         "hand_ending": session.hand_ending,
@@ -243,15 +243,11 @@ def _serialize_game(session: GameSession) -> dict:
             for r in h.rounds
         ],
         "hand_winner": None if h.winner is None else int(h.winner),
+        "hand_drawn": h.drawn,
     })
 
-    # Reveal P1's hand to the player when:
-    # - Mão de 11 with P1 at 11 (open_hand_for == P0): rules say P1's hand
-    #   is shown to the opponent.
-    # - The agent is in cheat mode (impossible difficulty): the player gets
-    #   to peek as a UI visualization of the cheat.
-    if s.open_hand_for == Player.P0:
-        payload["p1_hand"] = [_card_dict(c) for c in h.hands[Player.P1]]
+    # Cheat mode (impossible difficulty) reveals P1's hand to the player as a
+    # UI visualization of the cheat.
     if session.agent.cheat:
         payload["p1_hand"] = [_card_dict(c) for c in h.hands[Player.P1]]
         payload["cheat_active"] = True

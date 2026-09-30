@@ -27,7 +27,8 @@ export interface GameStateDTO {
   scores: { p0: number; p1: number };
   dealer: number;
   iron_hand: boolean;
-  open_hand_for: number | null;
+  /** Player at 11 in a Mão de 11 hand (they decide to play or run). */
+  mao11_player: number | null;
   match_winner: number | null;
   terminated: boolean;
   legal_actions: number[];
@@ -43,6 +44,8 @@ export interface GameStateDTO {
   awaiting_mao11_response?: boolean;
   rounds?: RoundDTO[];
   hand_winner?: number | null;
+  /** Three tied rounds: the hand ended and nobody scored. */
+  hand_drawn?: boolean;
   hand_ending?: boolean;
 }
 

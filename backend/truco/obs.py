@@ -21,7 +21,8 @@ so 0 means "empty".
     [18]     Mão de 11 for the opponent (0/1)
     [19]     it is my turn (0/1)
     [20]     I am the dealer (0/1)
-    [21..23] opponent's cards when the rules reveal them, otherwise 0
+    [21..23] reserved, always 0 (the old Mão de 11 rule revealed the
+             opponent's cards here; the Paulista rule reveals nothing)
 """
 
 from __future__ import annotations
@@ -94,11 +95,7 @@ def _observe_v1(game: TrucoGame, me: Player) -> np.ndarray:
     obs[10] = s.scores[int(me)] / target
     obs[11] = s.scores[int(opp)] / target
     obs[15] = 1.0 if s.iron_hand else 0.0
-    obs[17] = 1.0 if s.open_hand_for == me else 0.0
-    obs[18] = 1.0 if s.open_hand_for == opp else 0.0
+    obs[17] = 1.0 if s.mao11_player == me else 0.0
+    obs[18] = 1.0 if s.mao11_player == opp else 0.0
     obs[20] = 1.0 if s.dealer == me else 0.0
-
-    if h is not None and s.open_hand_for == opp:
-        for i, c in enumerate(h.hands[opp][:3]):
-            obs[21 + i] = _card(c)
     return obs

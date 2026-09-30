@@ -118,10 +118,8 @@ class TrucoEnv(gym.Env):
             return
         h = s.hand
         print(f"Vira: {h.vira}   stake={h.stake}   pending={h.pending_stake}")
-        print(f"Iron hand: {s.iron_hand}   open_for: {s.open_hand_for}")
+        print(f"Iron hand: {s.iron_hand}   mao11: {s.mao11_player}")
         print(f"P0 hand: {[str(c) for c in h.hands[Player.P0]]}")
-        if s.open_hand_for == Player.P1:
-            print(f"P1 hand (open): {[str(c) for c in h.hands[Player.P1]]}")
         for i, rnd in enumerate(h.rounds):
             plays = [(p.name, str(c)) for p, c in rnd.plays]
             print(f"  Round {i+1}: {plays}  result={rnd.result}")

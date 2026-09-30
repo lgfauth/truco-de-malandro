@@ -155,9 +155,7 @@ def test_two_ties_then_third_round_decides():
     assert h.winner == Player.P1
 
 
-def test_win_loss_tie_goes_to_second_round_winner_CURRENT_BEHAVIOR():
-    # Characterizes the pre-fix behavior; the Paulista rule gives it to the
-    # first round winner (P0).
+def test_win_loss_tie_goes_to_first_round_winner():
     g = deal([C(Rank.THREE), C(Rank.SIX), C(Rank.KING, Suit.CLUBS)],
              [C(Rank.SIX, Suit.SPADES), C(Rank.THREE, Suit.SPADES),
               C(Rank.KING, Suit.HEARTS)])
@@ -166,18 +164,43 @@ def test_win_loss_tie_goes_to_second_round_winner_CURRENT_BEHAVIOR():
         play(g); play(g)
     assert [r.result for r in h.rounds] == [RoundResult.P0_WIN,
                                             RoundResult.P1_WIN, RoundResult.TIE]
+    assert h.winner == Player.P0
+    assert g.state.scores == [1, 0]
+
+
+def test_loss_win_tie_goes_to_first_round_winner_even_if_it_is_p1():
+    g = deal([C(Rank.SIX), C(Rank.THREE), C(Rank.KING, Suit.CLUBS)],
+             [C(Rank.THREE, Suit.SPADES), C(Rank.SIX, Suit.SPADES),
+              C(Rank.KING, Suit.HEARTS)])
+    h = _hand_after(g)
+    play(g); play(g)          # P1 wins round 1 and leads round 2
+    play(g, 0); play(g, 0)    # P1: 6 vs P0: 3 -> P0 wins
+    play(g); play(g)          # K vs K
+    assert [r.result for r in h.rounds] == [RoundResult.P1_WIN,
+                                            RoundResult.P0_WIN, RoundResult.TIE]
     assert h.winner == Player.P1
-    assert g.state.scores == [0, 1]
 
 
-def test_three_ties_go_to_hand_leader_CURRENT_BEHAVIOR():
+def test_split_rounds_then_third_round_decides():
+    g = deal([C(Rank.THREE), C(Rank.SIX), C(Rank.TWO)],
+             [C(Rank.SEVEN), C(Rank.ACE), C(Rank.KING)])
+    h = _hand_after(g)
+    play(g); play(g)          # P0 3 beats 7
+    play(g, 0); play(g, 0)    # P0 6 loses to A
+    play(g); play(g)          # P1 leads K, P0 answers 2
+    assert h.winner == Player.P0
+
+
+def test_three_ties_score_nothing():
     g = deal([C(Rank.KING, Suit.CLUBS), C(Rank.ACE, Suit.CLUBS), C(Rank.SIX, Suit.CLUBS)],
              [C(Rank.KING, Suit.HEARTS), C(Rank.ACE, Suit.HEARTS), C(Rank.SIX, Suit.HEARTS)])
     h = _hand_after(g)
     for _ in range(3):
         play(g); play(g)
-    assert h.winner == Player.P0
-    assert g.state.scores == [1, 0]
+    assert h.drawn and h.winner is None and h.is_over()
+    assert g.state.scores == [0, 0]
+    assert g.state.hand is not h
+    assert g.state.dealer == Player.P0
 
 
 # --- Truco ------------------------------------------------------------------
@@ -253,31 +276,46 @@ def test_iron_hand_is_worth_three_and_has_no_truco():
     g = deal([C(Rank.THREE), C(Rank.TWO), C(Rank.ACE)],
              [C(Rank.SIX), C(Rank.SEVEN), C(Rank.KING)], scores=[11, 11])
     s = g.state
-    assert s.iron_hand and s.open_hand_for is None
+    assert s.iron_hand and s.mao11_player is None
     assert s.hand.stake == 3
     assert not s.hand.awaiting_mao11_response
     assert all(a.type == A.PLAY_CARD for a in g.legal_actions())
 
 
-def test_mao_de_11_opponent_decides_CURRENT_BEHAVIOR():
+@pytest.mark.parametrize("at_11", [Player.P0, Player.P1])
+def test_mao_de_11_player_at_11_decides(at_11):
+    scores = [11, 5] if at_11 == Player.P0 else [5, 11]
+    g = deal([C(Rank.THREE), C(Rank.TWO), C(Rank.ACE)],
+             [C(Rank.SIX), C(Rank.SEVEN), C(Rank.KING)], scores=scores)
+    s = g.state
+    assert s.mao11_player == at_11
+    assert s.hand.awaiting_mao11_response
+    assert s.hand.current_player == at_11
+    assert _types(g) == {(A.ACCEPT, None), (A.RUN, None)}
+
+
+def test_mao_de_11_accept_plays_for_three_without_truco():
     g = deal([C(Rank.THREE), C(Rank.TWO), C(Rank.ACE)],
              [C(Rank.SIX), C(Rank.SEVEN), C(Rank.KING)], scores=[11, 5])
-    s = g.state
-    assert s.open_hand_for == Player.P0
-    assert s.hand.awaiting_mao11_response
-    assert s.hand.current_player == Player.P1
-    assert _types(g) == {(A.ACCEPT, None), (A.RUN, None)}
+    h = g.state.hand
     act(g, A.ACCEPT)
-    assert s.hand.stake == 3
-    assert s.hand.current_player == s.hand.first_to_play
+    assert h.stake == 3 and not h.awaiting_mao11_response
+    assert h.current_player == h.first_to_play
+    for _ in range(2):
+        assert (A.CALL_TRUCO, None) not in _types(g)
+        play(g)
+    play(g); play(g)
+    assert g.state.scores == [14, 5]
+    assert g.state.winner == Player.P0
 
 
-def test_mao_de_11_run_concedes_the_match_CURRENT_BEHAVIOR():
+def test_mao_de_11_run_gives_one_point_to_the_opponent():
     g = deal([C(Rank.THREE), C(Rank.TWO), C(Rank.ACE)],
              [C(Rank.SIX), C(Rank.SEVEN), C(Rank.KING)], scores=[11, 5])
     act(g, A.RUN)
-    assert g.state.scores == [12, 5]
-    assert g.state.winner == Player.P0
+    assert g.state.scores == [11, 6]
+    assert g.state.winner is None
+    assert g.state.mao11_player == Player.P0  # still at 11: next hand too
 
 
 # --- Match end ----------------------------------------------------------------

@@ -1,7 +1,9 @@
 """observe() must reproduce the v1 layout the existing checkpoints expect.
 
-``data/obs_v1_golden.npz`` was recorded from the original ``TrucoEnv._observe``
-(P0) and ``_p1_view`` (P1) implementations over 300 random matches.
+``data/obs_v1_golden.npz`` was first recorded from the original
+``TrucoEnv._observe`` (P0) and ``_p1_view`` (P1) implementations over 300
+random matches, and matched ``observe()`` exactly. It was re-recorded with
+``data/make_obs_golden.py`` when the Mão de 11 and round-tie rules changed.
 """
 
 from __future__ import annotations
@@ -44,9 +46,13 @@ def test_observe_is_symmetric_and_bounded():
     assert o0[20] + o1[20] == 1
 
 
-def test_observe_never_reveals_hidden_opponent_cards():
-    for seed in range(50):
+def test_observe_never_reveals_opponent_cards():
+    import random
+
+    for seed in range(100):
         g = TrucoGame(seed=seed)
-        if g.state.open_hand_for is None:
+        rng = random.Random(seed)
+        while g.state.winner is None:
             assert not observe(g, Player.P0)[21:].any()
             assert not observe(g, Player.P1)[21:].any()
+            g.step(rng.choice(g.legal_actions()))
