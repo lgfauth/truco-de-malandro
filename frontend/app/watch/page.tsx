@@ -1,312 +1,255 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { MetricChart, SERIES, opponentColor, type Row } from "@/components/charts";
+import { Button, Card, Empty, ErrorBox, Page, Stat } from "@/components/ui";
 import {
+  getRunMetrics,
   getTrainStatus,
   metricsWebSocketUrl,
   pauseTrain,
   resetTrain,
   startTrain,
 } from "@/lib/api";
-import type { EvalMetric, TrainStatus, WSMessage } from "@/types/game";
+import { duration, pct, playerLabel, steps } from "@/lib/format";
+import type { TrainStatus } from "@/types/game";
+import type { RunMetric } from "@/types/runs";
 
-function formatElapsed(totalSeconds: number): string {
-  const s = Math.max(0, Math.floor(totalSeconds));
-  const m = Math.floor(s / 60);
-  const ss = (s % 60).toString().padStart(2, "0");
-  return `${m}:${ss}`;
-}
+type WSMsg =
+  | { type: "metrics"; run_id: string | null; full: RunMetric[] }
+  | ({ type: "status" } & TrainStatus);
 
 export default function WatchPage() {
-  const [metrics, setMetrics] = useState<EvalMetric[]>([]);
+  const [metrics, setMetrics] = useState<RunMetric[]>([]);
   const [status, setStatus] = useState<TrainStatus | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [elapsed, setElapsed] = useState(0);
-  const wsRef = useRef<WebSocket | null>(null);
-  const startedAtRef = useRef<number | null>(null);
-  const lastTimestepRef = useRef<number>(0);
+  const [totalSteps, setTotalSteps] = useState(500_000);
+  const [obsVersion, setObsVersion] = useState<"v1" | "v2">("v2");
+  const [busy, setBusy] = useState(false);
+  const runIdRef = useRef<string | null>(null);
 
-  // Initial fetch
-  useEffect(() => {
-    getTrainStatus()
-      .then((s) => {
-        setStatus(s);
-        if (s.latest_metric) setMetrics([s.latest_metric]);
-      })
+  // Follow the current run: reload its metrics from disk when it changes
+  // (covers page reloads and runs started elsewhere).
+  function followRun(runId: string | null | undefined) {
+    if (!runId || runId === runIdRef.current) return;
+    runIdRef.current = runId;
+    getRunMetrics(runId)
+      .then((m) => setMetrics(m.items))
       .catch(() => {});
-  }, []);
+  }
 
-  // HTTP polling — runs always every 3s. When WS is connected, only updates
-  // status (WS already pushes metrics). When WS is down, also accumulates metrics.
   useEffect(() => {
-    const id = setInterval(() => {
+    const tick = () =>
       getTrainStatus()
         .then((s) => {
           setStatus(s);
-          if (!wsConnected && s.latest_metric) {
-            setMetrics((prev) => {
-              const last = prev[prev.length - 1];
-              if (!last || last.timestep !== s.latest_metric!.timestep) {
-                return [...prev, s.latest_metric!];
-              }
-              return prev;
-            });
-          }
+          followRun(s.run_id);
+          setError(null);
         })
-        .catch(() => {});
-    }, 3000);
+        .catch((e) => setError(`Backend indisponível: ${(e as Error).message}`));
+    tick();
+    const id = setInterval(tick, 3000);
     return () => clearInterval(id);
-  }, [wsConnected]);
+  }, []);
 
   useEffect(() => {
     const ws = new WebSocket(metricsWebSocketUrl());
-    wsRef.current = ws;
     ws.onopen = () => setWsConnected(true);
     ws.onclose = () => setWsConnected(false);
     ws.onerror = () => setWsConnected(false);
     ws.onmessage = (ev) => {
       try {
-        const msg: WSMessage = JSON.parse(ev.data);
-        if (msg.type === "metrics") {
-          setMetrics((prev) => [...prev, ...msg.items]);
+        const msg: WSMsg = JSON.parse(ev.data);
+        if (msg.type === "metrics" && msg.full?.length) {
+          if (msg.run_id && msg.run_id !== runIdRef.current) {
+            runIdRef.current = msg.run_id;
+            setMetrics(msg.full);
+          } else {
+            setMetrics((prev) => {
+              const seen = new Set(prev.map((m) => m.timestep));
+              return [...prev, ...msg.full.filter((m) => !seen.has(m.timestep))];
+            });
+          }
         } else if (msg.type === "status") {
           const { type: _t, ...rest } = msg;
           setStatus(rest as TrainStatus);
         }
       } catch {
-        /* ignore */
+        /* ignore malformed frames */
       }
     };
     return () => ws.close();
   }, []);
 
-  // Track elapsed wall-clock time of the current training run.
-  // Anchor when running flips on; freeze when off; zero out when /train/reset
-  // drops timestep back to 0.
-  useEffect(() => {
-    if (!status) return;
-    if (status.running) {
-      if (startedAtRef.current == null) {
-        startedAtRef.current = Date.now() - elapsed * 1000;
-      }
-    } else {
-      startedAtRef.current = null;
-    }
-    if (status.timestep === 0 && lastTimestepRef.current > 0) {
-      setElapsed(0);
-      startedAtRef.current = status.running ? Date.now() : null;
-    }
-    lastTimestepRef.current = status.timestep;
-  }, [status, elapsed]);
-
-  useEffect(() => {
-    if (!status?.running) return;
-    const id = setInterval(() => {
-      if (startedAtRef.current != null) {
-        setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000));
-      }
-    }, 1000);
-    return () => clearInterval(id);
-  }, [status?.running]);
-
-  async function handleStart() {
+  async function act(fn: () => Promise<unknown>) {
     setError(null);
+    setBusy(true);
     try {
-      await startTrain();
+      await fn();
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function handlePause() {
-    setError(null);
-    try {
-      await pauseTrain();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
+  const keys = useMemo(() => {
+    const k: string[] = [];
+    for (const m of metrics) for (const key of Object.keys(m.eval)) if (!k.includes(key)) k.push(key);
+    return k;
+  }, [metrics]);
 
-  async function handleReset() {
-    setError(null);
-    try {
-      await resetTrain();
-      setMetrics([]);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-
-  const chartData = metrics.map((m) => ({
-    episode: m.episode,
+  const winData: Row[] = metrics.map((m) => {
+    const row: Row = { timestep: m.timestep };
+    for (const k of keys) row[k] = m.eval[k]?.win_rate ?? null;
+    return row;
+  });
+  const entropy: Row[] = metrics.map((m) => ({ timestep: m.timestep, entropy: m.train.entropy }));
+  const truco: Row[] = metrics.map((m) => ({
     timestep: m.timestep,
-    win_rate: Number((m.win_rate * 100).toFixed(2)),
-    mean_reward: Number(m.mean_reward.toFixed(3)),
-    mean_steps: Number(m.mean_steps.toFixed(2)),
-    entropy: Number((m.entropy ?? 0).toFixed(4)),
-    truco_rate_pct: Number(((m.truco_rate ?? 0) * 100).toFixed(2)),
-    run_rate_pct: Number(((m.run_rate ?? 0) * 100).toFixed(2)),
+    train: m.train.truco_rate,
+    run: m.train.run_rate,
   }));
 
+  const running = !!status?.running;
+  const progress = status?.total_timesteps ? status.timestep / status.total_timesteps : 0;
+  const latest = metrics[metrics.length - 1];
+
   return (
-    <main className="min-h-screen px-6 py-8 max-w-6xl mx-auto space-y-6">
-      <nav className="flex items-center justify-between">
-        <Link href="/" className="text-zinc-400 hover:text-zinc-100">
-          ← Voltar
-        </Link>
-        <span className="text-xs text-zinc-500">
-          WS: {wsConnected ? "conectado" : "desconectado"}
-        </span>
-      </nav>
-
-      <h1 className="text-3xl font-bold">Treino do agente</h1>
-
-      <div className="flex flex-wrap gap-3">
-        <button
-          onClick={handleStart}
-          className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-semibold"
-        >
-          Iniciar treino
-        </button>
-        <button
-          onClick={handlePause}
-          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 font-semibold"
-        >
-          Pausar
-        </button>
-        <button
-          onClick={handleReset}
-          className="px-4 py-2 rounded-lg bg-rose-700 hover:bg-rose-600 font-semibold"
-        >
-          Resetar
-        </button>
-      </div>
-
-      {error && (
-        <div className="p-3 rounded bg-rose-950 border border-rose-800 text-rose-200 text-sm">
-          {error}
+    <Page
+      title="Treino do agente"
+      subtitle={
+        <>
+          Treino em liga dentro do servidor. Para treinos longos prefira{" "}
+          <code className="text-zinc-300">python -m agent.train</code> no backend. WS:{" "}
+          {wsConnected ? "conectado" : "desconectado"}
+        </>
+      }
+    >
+      <Card title="Controle">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            Passos
+            <select
+              value={totalSteps}
+              onChange={(e) => setTotalSteps(Number(e.target.value))}
+              disabled={running}
+              className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100"
+            >
+              {[100_000, 500_000, 1_000_000, 3_000_000].map((n) => (
+                <option key={n} value={n}>{steps(n)}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            Observação
+            <select
+              value={obsVersion}
+              onChange={(e) => setObsVersion(e.target.value as "v1" | "v2")}
+              disabled={running}
+              className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100"
+            >
+              <option value="v2">v2 (força, manilha, histórico)</option>
+              <option value="v1">v1 (original)</option>
+            </select>
+          </label>
+          <Button
+            tone="emerald"
+            disabled={running || busy}
+            onClick={() => act(() => startTrain({ total_timesteps: totalSteps, obs_version: obsVersion, name: `web_${obsVersion}` }))}
+          >
+            Iniciar treino
+          </Button>
+          <Button tone="amber" disabled={!running || busy} onClick={() => act(pauseTrain)}>
+            Parar
+          </Button>
+          <Button
+            tone="rose"
+            disabled={busy}
+            onClick={() =>
+              act(async () => {
+                await resetTrain();
+                runIdRef.current = null;
+                setMetrics([]);
+              })
+            }
+          >
+            Limpar
+          </Button>
         </div>
-      )}
+        <p className="text-xs text-zinc-500 mt-2">
+          Parar encerra a run e salva o modelo (final.zip); Limpar só esquece o estado desta tela —
+          as runs continuam em <Link href="/runs" className="underline">Runs</Link>.
+        </p>
+      </Card>
 
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatusCard
-          label="Status"
-          value={status?.running ? "Rodando" : status?.paused ? "Pausado" : "Parado"}
-          tone={status?.running ? "emerald" : "zinc"}
+      {error && <ErrorBox error={error} />}
+      {status?.error && <ErrorBox error={`O treino falhou: ${status.error}`} />}
+
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Stat label="Status" value={running ? "Rodando" : status?.paused ? "Parado" : "Ocioso"} />
+        <Stat
+          label="Passos"
+          value={steps(status?.timestep ?? 0)}
+          hint={status?.total_timesteps ? `${pct(progress, 0)} de ${steps(status.total_timesteps)}` : undefined}
         />
-        <StatusCard label="Time" value={formatElapsed(elapsed)} />
-        <StatusCard label="Timestep" value={status?.timestep ?? 0} />
-        <StatusCard label="Episode" value={status?.episode ?? 0} />
+        <Stat label="Partidas de treino" value={status?.episode ?? 0} />
+        <Stat
+          label="Run"
+          value={
+            status?.run_id ? (
+              <Link href={`/runs/${encodeURIComponent(status.run_id)}`} className="underline text-base">
+                ver detalhes
+              </Link>
+            ) : "—"
+          }
+          hint={latest ? `última aval. em ${steps(latest.timestep)} · ${duration(latest.elapsed_s)}` : undefined}
+        />
       </section>
 
-      <section className="grid grid-cols-2 gap-4">
-        <ChartCard title="Win rate (%)">
-          <MiniChart data={chartData} dataKey="win_rate" stroke="#10b981" yDomain={[0, 100]} />
-        </ChartCard>
-        <ChartCard title="Steps médios">
-          <MiniChart data={chartData} dataKey="mean_steps" stroke="#3b82f6" />
-        </ChartCard>
-        <ChartCard title="Entropy da policy">
-          <MiniChart data={chartData} dataKey="entropy" stroke="#8b5cf6" />
-        </ChartCard>
-        <ChartCard title="Taxa de truco (%)">
-          <MiniChart data={chartData} dataKey="truco_rate_pct" stroke="#f59e0b" yDomain={[0, 100]} />
-        </ChartCard>
-      </section>
-
-      {status?.latest_metric && (
-        <section className="text-sm text-zinc-400">
-          Última avaliação: win rate{" "}
-          <span className="text-zinc-100 font-semibold">
-            {(status.latest_metric.win_rate * 100).toFixed(1)}%
-          </span>{" "}
-          · steps médios{" "}
-          <span className="text-zinc-100 font-semibold">
-            {status.latest_metric.mean_steps.toFixed(1)}
-          </span>
-        </section>
+      {metrics.length === 0 ? (
+        <Empty>
+          {running
+            ? "Treinando… a primeira avaliação aparece no primeiro intervalo de avaliação."
+            : "Nenhum treino acompanhado agora. Inicie um acima ou abra uma run em Runs."}
+        </Empty>
+      ) : (
+        <>
+          <Card title="Taxa de vitória na avaliação" subtitle="Mãos fixas, dois lados; tracejado = 50%.">
+            <MetricChart
+              data={winData}
+              series={keys.map((k) => ({ key: k, label: playerLabel(k), color: opponentColor(k, keys) }))}
+              yDomain={[0, 1]}
+              yFormat={(v) => pct(v, 0)}
+              refY={0.5}
+              height={260}
+            />
+          </Card>
+          <section className="grid md:grid-cols-2 gap-4">
+            <Card title="Entropia da política">
+              <MetricChart
+                data={entropy}
+                series={[{ key: "entropy", label: "Entropia", color: SERIES[0] }]}
+                height={180}
+              />
+            </Card>
+            <Card title="Truco e corrida no treino" subtitle="Trucos por mão · fração das apostas em que correu.">
+              <MetricChart
+                data={truco}
+                series={[
+                  { key: "train", label: "Trucos/mão", color: SERIES[0] },
+                  { key: "run", label: "Corrida", color: SERIES[1] },
+                ]}
+                yDomain={[0, 1]}
+                height={180}
+              />
+            </Card>
+          </section>
+        </>
       )}
-    </main>
-  );
-}
-
-function StatusCard({
-  label,
-  value,
-  tone = "zinc",
-}: {
-  label: string;
-  value: string | number;
-  tone?: "zinc" | "emerald";
-}) {
-  return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-      <div className="text-xs uppercase tracking-wide text-zinc-500">
-        {label}
-      </div>
-      <div
-        className={`mt-1 text-2xl font-bold ${
-          tone === "emerald" ? "text-emerald-400" : "text-zinc-100"
-        }`}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function MiniChart({
-  data,
-  dataKey,
-  stroke,
-  yDomain,
-}: {
-  data: Array<Record<string, number>>;
-  dataKey: string;
-  stroke: string;
-  yDomain?: [number, number];
-}) {
-  return (
-    <ResponsiveContainer width="100%" height={180}>
-      <LineChart data={data}>
-        <CartesianGrid stroke="#27272a" strokeDasharray="3 3" />
-        <XAxis dataKey="episode" stroke="#71717a" />
-        <YAxis domain={yDomain ?? ["auto", "auto"]} stroke="#71717a" />
-        <Tooltip
-          contentStyle={{
-            background: "#18181b",
-            border: "1px solid #3f3f46",
-          }}
-        />
-        <Line type="monotone" dataKey={dataKey} stroke={stroke} strokeWidth={2} dot={false} />
-      </LineChart>
-    </ResponsiveContainer>
-  );
-}
-
-function ChartCard({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-      <h2 className="text-sm font-semibold text-zinc-300 mb-3">{title}</h2>
-      {children}
-    </div>
+    </Page>
   );
 }

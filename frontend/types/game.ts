@@ -33,10 +33,11 @@ export interface GameStateDTO {
   terminated: boolean;
   legal_actions: number[];
 
+  opponent?: { ref: string; label: string };
+  stats?: { p0: GameSideStats; p1: GameSideStats };
   vira?: CardDTO;
   p0_hand?: CardDTO[];
-  p1_hand?: CardDTO[];
-  cheat_active?: boolean;
+  p1_cards_left?: number;
   stake?: number;
   pending_stake?: number | null;
   truco_caller?: number | null;
@@ -47,6 +48,13 @@ export interface GameStateDTO {
   /** Three tied rounds: the hand ended and nobody scored. */
   hand_drawn?: boolean;
   hand_ending?: boolean;
+}
+
+export interface GameSideStats {
+  truco_calls: number;
+  raises: number;
+  accepts: number;
+  runs: number;
 }
 
 export interface EvalMetric {
@@ -66,6 +74,9 @@ export interface TrainStatus {
   timestep: number;
   episode: number;
   latest_metric: EvalMetric | null;
+  run_id?: string | null;
+  total_timesteps?: number;
+  error?: string | null;
 }
 
 export type WSMessage =

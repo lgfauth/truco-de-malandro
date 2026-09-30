@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-import { newGame, nextHand, sendAction } from "@/lib/api";
+import { getArenaPlayers, newGame, nextHand, sendAction } from "@/lib/api";
+import type { PlayersList } from "@/types/runs";
 import { useTrucoSounds } from "@/hooks/useTrucoSounds";
 import {
   ACTION_ACCEPT,
@@ -12,6 +13,7 @@ import {
   ACTION_RAISE,
   ACTION_RUN,
   type CardDTO,
+  type GameSideStats,
   type GameStateDTO,
 } from "@/types/game";
 
@@ -42,6 +44,17 @@ export default function PlayPage() {
   const [frozenGame, setFrozenGame] = useState<GameStateDTO | null>(null);
   const [events, setEvents] = useState<string[]>([]);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [opponent, setOpponent] = useState("impossivel");
+  const [players, setPlayers] = useState<PlayersList | null>(null);
+
+  useEffect(() => {
+    getArenaPlayers()
+      .then((p) => {
+        setPlayers(p);
+        setOpponent((cur) => cur || p.default);
+      })
+      .catch(() => setPlayers(null)); // selector falls back to the default level
+  }, []);
 
   const sounds = useTrucoSounds();
   const stakeSound: Record<number, () => void> = {
@@ -192,7 +205,7 @@ export default function PlayPage() {
     setError(null);
     setBusy(true);
     try {
-      setGame(await newGame());
+      setGame(await newGame(opponent));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -260,7 +273,7 @@ export default function PlayPage() {
           </Link>
           {game && (
             <span className="text-xs text-zinc-300/80">
-              Partida {game.game_id.slice(0, 8)}
+              {game.opponent ? `vs ${game.opponent.label} · ` : ""}Partida {game.game_id.slice(0, 8)}
             </span>
           )}
         </nav>
@@ -269,13 +282,50 @@ export default function PlayPage() {
 
         <section className="rounded-xl bg-felt-800/70 border border-emerald-900 p-4">
           <div className="flex flex-wrap gap-2 items-center justify-between">
-            <button
-              onClick={handleNewGame}
-              disabled={busy}
-              className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-800 font-semibold"
-            >
-              Nova partida
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-2 text-sm text-zinc-200">
+                Oponente
+                <select
+                  value={opponent}
+                  onChange={(e) => setOpponent(e.target.value)}
+                  disabled={busy}
+                  className="bg-zinc-900/80 border border-emerald-900 rounded-lg px-2 py-1.5 text-sm max-w-[14rem]"
+                >
+                  {players ? (
+                    <>
+                      <optgroup label="Níveis">
+                        {players.levels.map((l) => (
+                          <option key={l.ref} value={l.ref}>{l.label}</option>
+                        ))}
+                      </optgroup>
+                      {players.models.length > 0 && (
+                        <optgroup label="Modelos">
+                          {players.models.map((m) => (
+                            <option key={m.ref} value={m.ref}>{m.label}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {players.runs.map((r) => (
+                        <optgroup key={r.run_id} label={`Run ${r.name}`}>
+                          {r.checkpoints.map((c) => (
+                            <option key={c.ref} value={c.ref}>{r.name} · {c.kind}</option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </>
+                  ) : (
+                    <option value="impossivel">Impossível — PPO 1M</option>
+                  )}
+                </select>
+              </label>
+              <button
+                onClick={handleNewGame}
+                disabled={busy}
+                className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-800 font-semibold"
+              >
+                Nova partida
+              </button>
+            </div>
             <button
               onClick={() => setRulesOpen(true)}
               className="px-4 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-zinc-100 font-semibold"
@@ -507,6 +557,7 @@ function MatchEndOverlay({
             {game.scores.p0} × {game.scores.p1}
           </span>
         </p>
+        {game.stats && <MatchStats p0={game.stats.p0} p1={game.stats.p1} />}
         <button
           onClick={onNewGame}
           disabled={busy}
@@ -822,5 +873,34 @@ function ActionButton({
     >
       {children}
     </button>
+  );
+}
+
+function MatchStats({ p0, p1 }: { p0: GameSideStats; p1: GameSideStats }) {
+  const rows: [string, (x: GameSideStats) => number][] = [
+    ["Trucos pedidos", (x) => x.truco_calls],
+    ["Aumentos (6/9/12)", (x) => x.raises],
+    ["Apostas aceitas", (x) => x.accepts],
+    ["Corridas", (x) => x.runs],
+  ];
+  return (
+    <table className="w-full text-sm tabular-nums text-left">
+      <thead className="text-xs text-zinc-400">
+        <tr>
+          <th className="font-medium py-1" />
+          <th className="font-medium py-1 text-right">Você</th>
+          <th className="font-medium py-1 text-right">IA</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(([label, f]) => (
+          <tr key={label} className="border-t border-zinc-800">
+            <td className="py-1 text-zinc-300">{label}</td>
+            <td className="py-1 text-right text-zinc-100">{f(p0)}</td>
+            <td className="py-1 text-right text-zinc-100">{f(p1)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }

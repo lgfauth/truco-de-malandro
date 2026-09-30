@@ -1,4 +1,12 @@
 import type { GameStateDTO, TrainStatus } from "@/types/game";
+import type {
+  ArenaJob,
+  CheckpointInfo,
+  Matrix,
+  PlayersList,
+  RunMetric,
+  RunSummary,
+} from "@/types/runs";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -23,10 +31,10 @@ async function request<T>(
 }
 
 // --- Game --------------------------------------------------------
-export function newGame() {
+export function newGame(opponent?: string) {
   return request<GameStateDTO>("/game/new", {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify(opponent ? { opponent } : {}),
   });
 }
 
@@ -51,10 +59,18 @@ export function getState(game_id: string) {
 }
 
 // --- Training ----------------------------------------------------
-export function startTrain(total_timesteps?: number) {
+export interface StartTrainOptions {
+  total_timesteps?: number;
+  name?: string;
+  obs_version?: "v1" | "v2";
+  eval_every?: number;
+  eval_games?: number;
+}
+
+export function startTrain(opts: StartTrainOptions = {}) {
   return request<{ status: string }>("/train/start", {
     method: "POST",
-    body: JSON.stringify({ total_timesteps: total_timesteps ?? 500000 }),
+    body: JSON.stringify({ total_timesteps: 500000, ...opts }),
   });
 }
 
@@ -78,4 +94,55 @@ export function getTrainStatus() {
 
 export function metricsWebSocketUrl(): string {
   return API_URL.replace(/^http/, "ws") + "/ws/metrics";
+}
+
+// --- Runs --------------------------------------------------------
+export function listRuns() {
+  return request<RunSummary[]>("/runs");
+}
+
+export function getRun(id: string) {
+  return request<{ run: RunSummary; config: Record<string, unknown> }>(
+    `/runs/${encodeURIComponent(id)}`
+  );
+}
+
+export function getRunMetrics(id: string, since = 0) {
+  return request<{ items: RunMetric[]; next: number }>(
+    `/runs/${encodeURIComponent(id)}/metrics?since=${since}`
+  );
+}
+
+export function getRunCheckpoints(id: string) {
+  return request<CheckpointInfo[]>(`/runs/${encodeURIComponent(id)}/checkpoints`);
+}
+
+export function getRunMatrix(id: string) {
+  return request<Matrix>(`/runs/${encodeURIComponent(id)}/matrix`);
+}
+
+// --- Arena -------------------------------------------------------
+export function getArenaPlayers() {
+  return request<PlayersList>("/arena/players");
+}
+
+export function createArenaJob(body: {
+  a: string;
+  b: string;
+  games: number;
+  seed?: number;
+  run_id?: string;
+}) {
+  return request<ArenaJob>("/arena/jobs", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function getArenaJob(id: string) {
+  return request<ArenaJob>(`/arena/jobs/${encodeURIComponent(id)}`);
+}
+
+export function listArenaJobs(limit = 20) {
+  return request<ArenaJob[]>(`/arena/jobs?limit=${limit}`);
 }
