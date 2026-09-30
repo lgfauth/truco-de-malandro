@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -17,7 +18,8 @@ from pathlib import Path
 
 from .runner import run_matchup
 
-RESULTS_DIR = Path(__file__).resolve().parent.parent / "arena_results"
+RESULTS_DIR = Path(os.environ.get(
+    "TRUCO_ARENA_DIR", Path(__file__).resolve().parent.parent / "arena_results"))
 
 
 def _slug(spec: str) -> str:

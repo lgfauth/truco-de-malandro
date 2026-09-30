@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -39,7 +40,8 @@ from arena.runner import make_executor, run_matchup
 from arena.stats import wilson
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
-RUNS_DIR = BACKEND_DIR / "runs"
+# Point at a persistent volume in production (e.g. Railway) to keep runs.
+RUNS_DIR = Path(os.environ.get("TRUCO_RUNS_DIR", BACKEND_DIR / "runs"))
 
 MetricFn = Callable[[Dict[str, Any]], None]
 
@@ -54,8 +56,6 @@ def _git_commit() -> Dict[str, Any]:
                                     timeout=5).stdout.strip())
         return {"commit": sha or None, "dirty": dirty}
     except Exception:
-        import os
-
         return {"commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA"), "dirty": None}
 
 
@@ -77,7 +77,7 @@ def _write_json(path: Path, data: Dict[str, Any]) -> None:
     tmp.replace(path)
 
 
-def new_run_dir(name: str, runs_dir: Path = RUNS_DIR) -> Path:
+def new_run_dir(name: str, runs_dir: Path) -> Path:
     stamp = time.strftime("%Y%m%d-%H%M%S")
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)[:40] or "run"
     run_dir = runs_dir / f"{stamp}-{safe}"
@@ -111,6 +111,10 @@ class LeagueCallback(BaseCallback):
         self._train_values: Dict[str, float] = {}
         self._t0 = time.time()
         self._last_eval_ckpt: Optional[Path] = None
+
+    @property
+    def episodes(self) -> int:
+        return self._episodes
 
     # -- hooks --
     def _on_training_start(self) -> None:
@@ -264,12 +268,17 @@ def make_vec_env(cfg: TrainConfig, run_dir: Path) -> VecEnv:
     return DummyVecEnv(fns)
 
 
-def train_league(cfg: TrainConfig, runs_dir: Path = RUNS_DIR,
+def train_league(cfg: TrainConfig, runs_dir: Optional[Path] = None,
                  stop_flag: Optional[threading.Event] = None,
                  on_metric: Optional[MetricFn] = None,
-                 run_dir: Optional[Path] = None) -> Path:
-    """Run a full league training; returns the run directory."""
-    run_dir = run_dir or new_run_dir(cfg.name, runs_dir)
+                 run_dir: Optional[Path] = None,
+                 on_start: Optional[Callable[["LeagueCallback"], None]] = None) -> Path:
+    """Run a full league training; returns the run directory.
+
+    ``on_start`` receives the callback before learning starts, so a caller
+    (the API) can read live progress from it.
+    """
+    run_dir = run_dir or new_run_dir(cfg.name, runs_dir or RUNS_DIR)
     started = time.time()
     _write_json(run_dir / "config.json", {
         "config": cfg.to_dict(), "seed": cfg.seed, "git": _git_commit(),
@@ -284,7 +293,9 @@ def train_league(cfg: TrainConfig, runs_dir: Path = RUNS_DIR,
     _write_json(run_dir / "run.json", run_info)
 
     env = make_vec_env(cfg, run_dir)
-    executor = make_executor(cfg.eval_workers) if cfg.eval_workers > 1 else None
+    # Evaluations always run in worker processes, even with a single worker,
+    # so an in-server training thread never plays arena matches itself.
+    executor = make_executor(max(1, cfg.eval_workers))
     try:
         kwargs = ppo_kwargs(cfg.hyperparams)
         if cfg.init_from:
@@ -293,6 +304,8 @@ def train_league(cfg: TrainConfig, runs_dir: Path = RUNS_DIR,
             model = MaskablePPO("MlpPolicy", env, seed=cfg.seed, verbose=0,
                                 device="cpu", **kwargs)
         cb = LeagueCallback(cfg, run_dir, run_info, stop_flag, on_metric, executor)
+        if on_start is not None:
+            on_start(cb)
         model.learn(total_timesteps=cfg.total_timesteps, callback=cb, use_masking=True)
         save_atomic(model, run_dir / "final.zip")
         stopped = stop_flag is not None and stop_flag.is_set()
@@ -305,8 +318,7 @@ def train_league(cfg: TrainConfig, runs_dir: Path = RUNS_DIR,
         run_info["ended_at"] = time.time()
         _write_json(run_dir / "run.json", run_info)
         env.close()
-        if executor is not None:
-            executor.shutdown()
+        executor.shutdown()
     return run_dir
 
 
