@@ -48,6 +48,8 @@ export interface GameStateDTO {
   /** Three tied rounds: the hand ended and nobody scored. */
   hand_drawn?: boolean;
   hand_ending?: boolean;
+  /** A round just closed and the AI opens the next one; call /game/continue. */
+  ai_pending?: boolean;
 }
 
 export interface GameSideStats {

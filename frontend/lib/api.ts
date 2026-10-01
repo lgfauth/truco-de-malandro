@@ -45,6 +45,14 @@ export function sendAction(game_id: string, action: number) {
   });
 }
 
+/** Let the AI open the next round after the table pause (ai_pending). */
+export function continueGame(game_id: string) {
+  return request<GameStateDTO>("/game/continue", {
+    method: "POST",
+    body: JSON.stringify({ game_id }),
+  });
+}
+
 export function nextHand(game_id: string) {
   return request<GameStateDTO>("/game/next-hand", {
     method: "POST",

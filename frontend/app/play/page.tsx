@@ -8,7 +8,7 @@ import { MatchEndOverlay } from "@/components/game/MatchEnd";
 import { RulesModal } from "@/components/game/RulesModal";
 import { GameTable, RoundsHistory, nextStakeAfter, type HandToast } from "@/components/game/Table";
 import { useTrucoSounds } from "@/hooks/useTrucoSounds";
-import { getArenaPlayers, newGame, nextHand, sendAction } from "@/lib/api";
+import { continueGame, getArenaPlayers, newGame, nextHand, sendAction } from "@/lib/api";
 import {
   ACTION_ACCEPT,
   ACTION_CALL_TRUCO,
@@ -20,6 +20,8 @@ import {
 import type { PlayersList } from "@/types/runs";
 
 const MAX_EVENTS = 60;
+// How long the finished round stays on the table before the AI opens the next.
+const AI_PAUSE_MS = 3000;
 
 export default function PlayPage() {
   const [game, setGame] = useState<GameStateDTO | null>(null);
@@ -144,6 +146,21 @@ export default function PlayPage() {
     }
     prevTerminated.current = game?.terminated ?? false;
   }, [game?.terminated, game?.match_winner, sounds]);
+
+  // ai_pending: the AI won (or tied while leading) a round and opens the
+  // next one. Keep the finished round on the table, then let the AI move.
+  useEffect(() => {
+    if (!game?.ai_pending) return;
+    const id = setTimeout(async () => {
+      try {
+        setGame(await continueGame(game.game_id));
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    }, AI_PAUSE_MS);
+    return () => clearTimeout(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game?.ai_pending, game?.game_id, game?.rounds?.length]);
 
   // hand_ending: backend froze the state after a hand ended. Show a toast,
   // wait 2.5s, then call /game/next-hand to advance and clear the freeze.

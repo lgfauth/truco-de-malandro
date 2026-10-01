@@ -30,6 +30,10 @@ def _play_out(client, state):
         if state["hand_ending"]:
             state = client.post("/game/next-hand", json={"game_id": gid}).json()
             continue
+        if state["ai_pending"]:
+            assert state["legal_actions"] == []
+            state = client.post("/game/continue", json={"game_id": gid}).json()
+            continue
         r = client.post("/game/action", json={"game_id": gid, "action": state["legal_actions"][0]})
         assert r.status_code == 200, r.text
         state = r.json()
@@ -70,6 +74,8 @@ def test_human_actions_are_counted(client):
     while 3 not in state["legal_actions"]:
         if state["hand_ending"]:
             state = client.post("/game/next-hand", json={"game_id": state["game_id"]}).json()
+        elif state["ai_pending"]:
+            state = client.post("/game/continue", json={"game_id": state["game_id"]}).json()
         else:
             state = client.post("/game/action", json={"game_id": state["game_id"],
                                                       "action": state["legal_actions"][0]}).json()
@@ -81,6 +87,40 @@ def test_human_actions_are_counted(client):
                                  "ppo:C:/x.zip", "ppo:models/missing.zip", "nope"])
 def test_unsafe_or_unknown_opponents_are_rejected(client, bad):
     assert client.post("/game/new", json={"opponent": bad}).status_code in (400, 404)
+
+
+def test_ai_waits_before_opening_the_next_round(client):
+    """When a round closes and the AI leads the next, it waits for /continue."""
+    seen = 0
+    for _ in range(20):
+        state = client.post("/game/new", json={"opponent": "rule"}).json()
+        gid = state["game_id"]
+        for _ in range(400):
+            if state["terminated"]:
+                break
+            if state["hand_ending"]:
+                state = client.post("/game/next-hand", json={"game_id": gid}).json()
+                continue
+            if state["ai_pending"]:
+                seen += 1
+                rounds = state["rounds"]
+                # The finished round is still on the table; the AI hasn't
+                # touched the new one.
+                assert rounds[-2]["result"] is not None and len(rounds[-2]["plays"]) == 2
+                assert rounds[-1]["plays"] == []
+                assert state["current_player"] == 1 and state["legal_actions"] == []
+                bad = client.post("/game/action", json={"game_id": gid, "action": 0})
+                assert bad.status_code == 400
+                state = client.post("/game/continue", json={"game_id": gid}).json()
+                assert not state["ai_pending"]
+                assert state["rounds"][-1]["plays"] or state["pending_stake"] is not None                     or state["hand_ending"]
+                continue
+            r = client.post("/game/action", json={"game_id": gid, "action": state["legal_actions"][0]})
+            state = r.json()
+        if seen >= 3:
+            break
+    assert seen >= 3
+    assert client.post("/game/continue", json={"game_id": gid}).status_code == 400
 
 
 def test_illegal_action_rejected(client):

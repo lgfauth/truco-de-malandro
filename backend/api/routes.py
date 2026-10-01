@@ -2,7 +2,7 @@
 
 Endpoints:
     POST /train/start, /train/pause, /train/reset, GET /train/status
-    POST /game/new, /game/action, /game/next-hand, GET /game/state
+    POST /game/new, /game/action, /game/continue, /game/next-hand, GET /game/state
     WS   /ws/metrics
     plus /runs/* (api/runs.py) and /arena/* (api/arena_jobs.py)
 
@@ -108,6 +108,10 @@ class GameSession:
         # the next one, so we keep a reference for serialization).
         self.hand_ending = False
         self.frozen_hand = None
+        # ai_pending: a round just closed and the AI opens the next one. The
+        # AI waits for /game/continue so the frontend can show the finished
+        # round on the table first.
+        self.ai_pending = False
         # When the AI must act first (P1 leads), play it now.
         self._run_ai_turns()
 
@@ -117,6 +121,13 @@ class GameSession:
             self.stats[side][key] += 1
 
     # ---- AI driving --------------------------------------------------------
+    def _ai_opens_next_round(self, hand, rounds_before: int) -> bool:
+        """A round of ``hand`` just closed and the AI must lead the next one."""
+        g = self.env.game
+        return (g.state.winner is None and g.state.hand is hand
+                and len(hand.rounds) > rounds_before
+                and hand.current_player == Player.P1)
+
     def _run_ai_turns(self) -> None:
         g = self.env.game
         while (
@@ -124,6 +135,7 @@ class GameSession:
             and g.state.hand is not None
             and g.state.hand.current_player == Player.P1
         ):
+            hand, rounds_before = g.state.hand, len(g.state.hand.rounds)
             try:
                 action = int(self.ai.decide(g, Player.P1))
             except Exception:
@@ -133,12 +145,32 @@ class GameSession:
             pa, _ = to_legal_action(g, action)
             self._record("p1", encode_action(pa))
             g.step(pa)
+            if self._ai_opens_next_round(hand, rounds_before):
+                self.ai_pending = True
+                return
+
+    def _settle(self, current_hand) -> None:
+        """Sync match end / hand end flags after moves on ``current_hand``."""
+        g = self.env.game
+        if g.state.winner is not None:
+            self.terminated = True
+            self.last_reward = 1.0 if g.state.winner == Player.P0 else -1.0
+        elif g.state.hand is not current_hand:
+            # Hand ended (by P0's action or by an AI play). Freeze the prior
+            # hand so the frontend can render its result before /game/next-hand
+            # advances to the new one.
+            self.frozen_hand = current_hand
+            self.hand_ending = True
+        self.last_obs = self.env._observe()
+        self.last_info = self.env._info()
 
     def step_human(self, action: int) -> None:
         if self.terminated:
             raise HTTPException(400, "Game is over.")
         if self.hand_ending:
             raise HTTPException(400, "Hand ended — call /game/next-hand first.")
+        if self.ai_pending:
+            raise HTTPException(400, "AI to play — call /game/continue first.")
         # Apply P0's action directly on the game, bypassing the env's internal
         # random opponent loop.
         g = self.env.game
@@ -153,26 +185,27 @@ class GameSession:
             raise HTTPException(400, "Illegal action for current state.")
 
         current_hand = g.state.hand
+        rounds_before = len(current_hand.rounds)
         self._record("p0", int(action))
         g.step(pa)
-        # Always let the AI advance: it must play its leading card on a new
-        # hand started by P0's RUN/last-card step, and any pending P1 turns
-        # mid-hand. _run_ai_turns is a no-op when the game is over or it's
-        # P0's turn, so this is safe in every branch.
+        if self._ai_opens_next_round(current_hand, rounds_before):
+            # P0's card closed a round the AI now leads: pause for the table.
+            self.ai_pending = True
+        else:
+            # Let the AI advance: its leading card on a new hand started by
+            # P0's RUN/last-card step, and any pending P1 turns mid-hand.
+            # _run_ai_turns is a no-op when the game is over or it's P0's turn.
+            self._run_ai_turns()
+        self._settle(current_hand)
+
+    def continue_ai(self) -> None:
+        """Called by /game/continue once the frontend has shown the round."""
+        if not self.ai_pending:
+            raise HTTPException(400, "Nothing to continue.")
+        self.ai_pending = False
+        current_hand = self.env.game.state.hand
         self._run_ai_turns()
-
-        if g.state.winner is not None:
-            self.terminated = True
-            self.last_reward = 1.0 if g.state.winner == Player.P0 else -1.0
-        elif g.state.hand is not current_hand:
-            # Hand ended (by P0's action or by an AI play). Freeze the prior
-            # hand so the frontend can render its result before /game/next-hand
-            # advances to the new one.
-            self.frozen_hand = current_hand
-            self.hand_ending = True
-
-        self.last_obs = self.env._observe()
-        self.last_info = self.env._info()
+        self._settle(current_hand)
 
     def advance_to_next_hand(self) -> None:
         """Called by /game/next-hand after the frontend has shown the result."""
@@ -219,6 +252,7 @@ def _serialize_game(session: GameSession) -> dict:
         "match_winner": None if s.winner is None else int(s.winner),
         "terminated": session.terminated,
         "hand_ending": session.hand_ending,
+        "ai_pending": session.ai_pending,
         "legal_actions": legal_ids,
         "stats": session.stats,
     }
@@ -288,6 +322,10 @@ class GameActionReq(BaseModel):
 
 
 class NextHandReq(BaseModel):
+    game_id: str
+
+
+class ContinueReq(BaseModel):
     game_id: str
 
 
@@ -397,6 +435,16 @@ def game_state(game_id: str):
     session = GAMES.get(game_id)
     if session is None:
         raise HTTPException(404, "Unknown game_id.")
+    return _serialize_game(session)
+
+
+@router.post("/game/continue")
+def game_continue(req: ContinueReq):
+    """Let the AI open the next round after the pause (see ai_pending)."""
+    session = GAMES.get(req.game_id)
+    if session is None:
+        raise HTTPException(404, "Unknown game_id.")
+    session.continue_ai()
     return _serialize_game(session)
 
 

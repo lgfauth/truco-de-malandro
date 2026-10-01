@@ -184,6 +184,7 @@ Estão em `tests/test_arena.py`: aleatório contra aleatório fica perto de 50%,
 | `POST` | `/game/new` | `{ opponent? }`: nível (`facil` = aleatório, `medio` = regra, `dificil` = `truco_ppo_1M`, `impossivel` = `truco_liga_v2`), `random`, `rule` ou `ppo:models/<zip>` / `ppo:runs/<id>/<zip>`; default `impossivel` |
 | `POST` | `/game/action` | `{ game_id, action: 0–6 }`; executa a ação do humano e os turnos da IA |
 | `GET` | `/game/state?game_id=` | Estado atual. Inclui `opponent`, `stats` (trucos, aumentos, aceites e corridas por lado) e `p1_cards_left`. As cartas da IA nunca são enviadas |
+| `POST` | `/game/continue` | Com `ai_pending=true` (uma rodada fechou e a IA abre a próxima), faz a IA jogar; o frontend chama após 3 s para a rodada encerrada ficar visível na mesa |
 | `POST` | `/game/next-hand` | Avança após `hand_ending=true` |
 | `GET` | `/health` | Health check |
 

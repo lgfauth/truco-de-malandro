@@ -317,6 +317,13 @@ function StatusLine({
   if (game.awaiting_mao11_response && game.mao11_player === 0) {
     text = "Mão de 11: olhe suas cartas — jogar vale 3; correr dá 1 ponto à IA.";
     tone = "text-amber-200 font-semibold";
+  } else if (game.ai_pending) {
+    const closed = (game.rounds ?? []).filter((r) => r.result != null);
+    const res = closed[closed.length - 1]?.result;
+    text =
+      res === 1
+        ? `IA venceu a ${closed.length}ª rodada — ela abre a próxima…`
+        : `Rodada ${closed.length} empatada — a IA abre a próxima…`;
   } else if (!game.hand_ending && !game.terminated) {
     if (legal.has(ACTION_ACCEPT) && game.pending_stake != null) {
       text = `A IA pediu ${game.pending_stake}! Aceita, corre ou aumenta?`;
