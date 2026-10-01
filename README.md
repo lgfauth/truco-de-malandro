@@ -1,6 +1,6 @@
 # Truco de Malandro
 
-Agente de aprendizado por reforço que joga **Truco Paulista** *heads-up* (1 vs 1). O agente é treinado com **MaskablePPO** (ação mascarada para garantir que apenas ações legais sejam exploradas) e disponibilizado via uma API REST + WebSocket. O frontend permite assistir o treino em tempo real e jogar contra a IA.
+Agente de aprendizado por reforço que joga **Truco Paulista** *heads-up* (1 vs 1). O agente é treinado com **MaskablePPO** (ações mascaradas: só ações legais são exploradas) em uma **liga de oponentes**, medido numa **arena offline** com intervalos de confiança e disponibilizado via API REST + WebSocket. O frontend mostra como o treino influencia a força da IA e permite jogar contra ela.
 
 ---
 
@@ -8,12 +8,14 @@ Agente de aprendizado por reforço que joga **Truco Paulista** *heads-up* (1 vs 
 
 | Funcionalidade | Descrição |
 |---|---|
-| Motor de regras completo | Truco Paulista com baralho de 40 cartas, manilhas, mão de 11, mão de ferro e escadinha de apostas 1→3→6→9→12 |
-| Ambiente Gymnasium | Espaço de observação (24 floats), espaço de ação Discrete (7) com máscara dinâmica, recompensa esparsa ±1.0 ao fim da partida |
-| Treino com MaskablePPO | Treinamento contra oponente aleatório ou *self-play*; checkpoints automáticos; métricas (win rate, recompensa média) transmitidas por WebSocket |
-| API REST | FastAPI com endpoints de treino, jogo e health check |
-| Frontend Next.js | Dashboard de métricas (gráficos em tempo real) e tabuleiro interativo (humano vs IA) com efeitos sonoros sintetizados |
-| Deploy no Railway | Dois serviços independentes (backend Python + frontend Node) com configuração pronta |
+| Motor de regras | Truco Paulista com baralho de 40 cartas, manilhas, escadinha 1→3→6→9→12, mão de 11 e mão de ferro |
+| Ambientes Gymnasium | `TrucoEnv` (P0 contra aleatório) e `LeagueEnv` (liga); ação `Discrete(7)` com máscara; recompensa ±1 no fim da partida |
+| Observação única | `observe(game, player, version)` usada por env, treino, API e arena; versões `v1` (24 floats) e `v2` (174 floats) |
+| Treino em liga | Oponente sorteado a cada partida entre aleatório, regra, snapshots anteriores e o mais recente, com pesos configuráveis |
+| Arena | Partidas offline entre quaisquer dois jogadores, cada mão jogada dos dois lados, IC de Wilson, log JSONL por decisão |
+| Runs persistidas | `runs/<id>/` com config, semente, commit, hiperparâmetros, métricas e checkpoints |
+| API REST | Jogo (com oponente configurável), treino, runs e jobs de arena |
+| Frontend Next.js | Runs e comparação, gráficos por run, matriz de confrontos, arena, tabuleiro humano vs IA |
 
 ---
 
@@ -22,204 +24,285 @@ Agente de aprendizado por reforço que joga **Truco Paulista** *heads-up* (1 vs 
 ```
 truco-de-malandro/
 ├── backend/
-│   ├── main.py               # Ponto de entrada FastAPI (CORS, rotas, health check)
-│   ├── requirements.txt      # Dependências Python
-    ├── train_all.py          # Script para treinar o modelo truco_ppo_1M (1M steps)
-│   ├── debug_env.py          # Script manual para inspecionar o ambiente (5 episódios)
-│   ├── Procfile              # Comando de start para o Railway
-│   ├── railway.toml          # Configuração de health check do Railway
+│   ├── main.py                 # FastAPI (CORS, rotas, /health)
+│   ├── requirements.txt        # Dependências de produção
+│   ├── requirements-dev.txt    # + pytest/httpx
+│   ├── pytest.ini
+│   ├── truco/
+│   │   ├── game.py             # Motor de regras puro (TrucoGame)
+│   │   ├── encoding.py         # Cartas <-> ids, ações 0..6, máscara, fallback legal
+│   │   ├── obs.py              # observe(game, player, version): v1 e v2
+│   │   ├── seeds.py            # Espaços de semente disjuntos (treino x avaliação)
+│   │   └── env.py              # TrucoEnv (Gymnasium)
 │   ├── agent/
-│   │   └── trainer.py        # Lógica MaskablePPO, self-play, callback de avaliação
+│   │   ├── config.py           # HYPERPARAMS e TrainConfig (fonte única)
+│   │   ├── league.py           # LeagueEnv e pool de oponentes
+│   │   └── train.py            # python -m agent.train (runs/<id>/)
+│   ├── arena/
+│   │   ├── players.py          # ArenaPlayer, RandomPlayer, RulePlayer, PPOPlayer, registro de specs
+│   │   ├── match.py            # Uma partida + estatísticas + log
+│   │   ├── runner.py           # Confronto paralelo, cada mão dos dois lados
+│   │   ├── stats.py            # IC de Wilson e resumo
+│   │   ├── run.py              # CLI: python -m arena.run
+│   │   └── tournament.py       # CLI: checkpoints x oponentes
 │   ├── api/
-│   │   └── routes.py         # Endpoints REST (/train/*, /game/*, /health) e WS /ws/metrics
-    ├── models/               # Checkpoint truco_ppo_1M.zip gerado pelo treino
-│   └── truco/
-│       ├── game.py           # Motor de regras puro (TrucoGame, dataclasses, ações)
-│       └── env.py            # Wrapper Gymnasium (TrucoEnv, observação, recompensa, máscara)
+│   │   ├── routes.py           # /game/*, /train/*, /ws/metrics
+│   │   ├── runs.py             # /runs/*
+│   │   ├── arena_jobs.py       # /arena/*
+│   │   └── players.py          # Níveis e validação das referências de jogador
+│   ├── models/                 # Checkpoints publicados (truco_liga_v2.zip é o de produção)
+│   └── tests/                  # pytest
 └── frontend/
-    ├── package.json          # React 18, Next.js 15, Recharts, TypeScript 5
-    ├── next.config.mjs
-    ├── tailwind.config.ts    # Tema com verde-feltro customizado
-    ├── app/
-    │   ├── layout.tsx        # Layout raiz, tema escuro, locale pt-BR
-    │   ├── page.tsx          # Home com links Watch / Play
-    │   ├── play/page.tsx     # Tabuleiro interativo (humano vs IA)
-    │   └── watch/page.tsx    # Dashboard de métricas do treino
-    ├── lib/
-    │   └── api.ts            # Cliente HTTP/WS centralizado
-    ├── types/
-    │   └── game.ts           # Interfaces TypeScript (GameStateDTO, EvalMetric, etc.)
-    └── hooks/
-        └── useTrucoSounds.ts # Sintetizador de efeitos sonoros via Web Audio API
+    ├── app/                    # /, /play, /watch, /runs, /runs/[id], /arena
+    ├── components/             # ui.tsx, charts.tsx, arena.tsx
+    ├── lib/                    # api.ts, format.ts, elo.ts
+    ├── types/                  # game.ts, runs.ts
+    └── hooks/useTrucoSounds.ts
 ```
 
 ---
 
-## Como o código funciona
+## Regras implementadas
 
-### Motor de regras (`truco/game.py`)
-
-`TrucoGame` encapsula toda a lógica do Truco Paulista:
-
-- **Baralho**: 40 cartas (ranks 4–3 + reis/damas/etc. × 4 naipes). A força das cartas segue a hierarquia do Truco Paulista e as manilhas são calculadas dinamicamente a partir da **vira**.
-- **Manilha**: rank seguinte à vira em ordem cíclica; em empate entre manilhas, desempate por naipe (Paus > Copas > Espadas > Ouros).
-- **Apostas (stake)**: escadinha 1 → 3 → 6 → 9 → 12. Um jogador pode pedir truco, aceitar, correr ou aumentar.
-- **Mão de 11**: quando um jogador chega a 11 pontos, o adversário vê as cartas dele e decide aceitar (joga por 3) ou correr (cede 1 ponto) antes de qualquer carta ser jogada.
-- **Mão de ferro**: ambos com 11 pontos — vale 1 ponto, sem truco e com cartas escondidas.
-- `legal_actions()` retorna apenas as `PlayerAction`s válidas para o turno atual.
-- `step(action)` aplica a ação e atualiza o estado (rodadas, stake, placar, vencedor).
-
-### Ambiente Gymnasium (`truco/env.py`)
-
-`TrucoEnv` adapta o `TrucoGame` para o ciclo `reset/step` do Gymnasium:
-
-- **Observação**: vetor de 24 floats em [0, 1] — cartas da mão (P0 e P1), vira, jogadas das 3 rodadas, placar normalizado, flags de estado (mão de 11, mão de ferro, stake pendente etc.).
-- **Máscara de ação**: vetor binário de tamanho 7 calculado dinamicamente a cada passo; o MaskablePPO nunca amostra ações ilegais.
-- **Recompensa**: esparsa — +1.0 ao P0 ganhar a partida, −1.0 ao perder, 0 nos demais passos.
-- **Self-play** (`_p1_view()`): inverte a perspectiva para que o oponente congelado jogue como P1.
-
-### Treino (`agent/trainer.py`)
-
-- **Algoritmo**: `sb3_contrib.MaskablePPO` com política MLP.
-- **Hiperparâmetros principais**: `lr=3e-4`, `n_steps=512`, `batch_size=32`, `ent_coef=0.05`.
-- **`TrainingCallback`**: avalia a cada 50 episódios contra um oponente aleatório (100 jogos), armazena métricas na lista `metrics` (win_rate, mean_reward, mean_steps).
-- **`_ControlCallback`**: checa o `stop_flag` para honrar pausas/resets via API.
-- **Self-play**: o oponente congelado é atualizado a cada 200 episódios com os pesos atuais do agente.
-- **Smoke test** (`smoke_test()`): 2 000 timesteps + validação de que a entropia é não-zero antes do treino completo.
-
-### API (`api/routes.py` + `main.py`)
-
-FastAPI exposta em `http://localhost:8000`:
-
-#### Treino
-
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| `POST` | `/train/start` | Inicia treino em thread daemon; aceita `{ total_timesteps, save_path }` |
-| `POST` | `/train/pause` | Para o treino graciosamente (timeout 5 s) |
-| `POST` | `/train/reset` | Encerra thread e limpa artefatos |
-| `GET` | `/train/status` | Retorna `{ running, paused, timestep, episode, latest_metric }` |
-| `WS` | `/ws/metrics` | Transmite métricas a cada 2 s enquanto o treino roda |
-
-#### Jogo
-
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| `POST` | `/game/new` | Cria partida com o agente padrão (1M steps, cheat mode) |
-| `POST` | `/game/action` | Executa ação do P0 e deixa a IA jogar seus turnos; aceita `{ game_id, action: 0–6 }` |
-| `GET` | `/game/state` | Retorna estado atual; aceita `?game_id=<str>` |
-| `POST` | `/game/next-hand` | Avança para a próxima mão após `hand_ending=true` |
-| `GET` | `/health` | Health check (`{ status: "ok" }`) |
-
-#### Ações (action IDs)
-
-| ID | Nome | Condição |
-|----|------|----------|
-| 0–2 | Jogar carta 0/1/2 | Qualquer turno de jogo |
-| 3 | Pedir Truco | Sem stake pendente |
-| 4 | Aceitar | Stake pendente ou mão de 11 |
-| 5 | Correr | Stake pendente ou mão de 11 |
-| 6 | Aumentar | Stake pendente (contra-aumento) |
-
-### Frontend
-
-- **`/`** — Home com links para Watch e Play.
-- **`/watch`** — Conecta ao WebSocket `/ws/metrics`, exibe gráficos de *win rate* e *recompensa média* (Recharts) e botões para iniciar/pausar/resetar o treino.
-- **`/play`** — Tabuleiro completo: cartas do P0 (clicáveis), cartas do P1 (escondidas ou reveladas na mão de 11), placar, rodadas, log de eventos, botões de ação e overlay de fim de partida. Efeitos sonoros sintetizados via Web Audio API para cada evento do jogo.
+- **Força das cartas** (sem manilha): 3 > 2 > A > K > J > Q > 7 > 6 > 5 > 4.
+- **Manilha**: o rank seguinte à vira na ordem cíclica 4,5,6,7,Q,J,K,A,2,3; entre manilhas vale o naipe (Paus > Copas > Espadas > Ouros).
+- **Apostas**: 1 → 3 → 6 → 9 → 12. Quem pede truco não pode aumentar de novo até o adversário aumentar. Correr dá ao outro o valor anterior ao pedido. Não se pode pedir um valor que ultrapasse o necessário para fechar a partida.
+- **Empates de rodada**: empate na 1ª → quem ganhar a próxima rodada decidida leva a mão. Vitória na 1ª e empate depois → leva quem ganhou a 1ª. Três empates → ninguém pontua.
+- **Mão de 11**: quando só um jogador tem 11, ele olha as próprias cartas e decide antes de jogar: aceita (a mão vale 3) ou corre (o adversário ganha 1). Ninguém vê as cartas do outro e não há truco nessa mão.
+- **Mão de ferro** (ambos com 11): vale 3 pontos, sem truco. Regra da casa: a interface esconde as cartas do humano, mas a IA vê as dela.
 
 ---
 
-## Jogar online
+## Observação do agente (`truco/obs.py`)
 
-Acesse diretamente pelo link do Railway, sem precisar rodar nada localmente:
+`observe(game, player, version)` é a única função que monta a visão de um jogador; nunca inclui cartas escondidas do adversário (há teste para isso).
 
-**[https://truco-malandro.up.railway.app](https://truco-malandro.up.railway.app)**
+- **v1** (24 floats): layout original, com cada carta como um escalar `(id+1)/40`. É a versão dos checkpoints `truco_ppo_*`.
+- **v2** (174 floats): cada carta da mão com rank e naipe em one-hot, força relativa à vira e flag de manilha. Inclui ainda a vira e o rank da manilha; a mesa (quem jogou, força, manilha); o resultado de cada rodada; a rodada atual e a carta a bater; as 40 cartas já vistas; o placar; a aposta atual e a pendente em one-hot; flags de mão de 11, mão de ferro, turno, pé, se pode aumentar e se fez o pedido pendente; e as cartas restantes de cada lado.
+
+O `PPOPlayer` detecta a versão pelo tamanho da entrada do modelo, então checkpoints v1 e v2 convivem na arena e na API.
 
 ---
 
-## Pré-requisitos
+## Treino
+
+### Hiperparâmetros
+
+Ficam num único dict, `HYPERPARAMS` em [`backend/agent/config.py`](backend/agent/config.py). Cada run grava os valores efetivos em `runs/<id>/config.json`. Um rollout junta `n_envs × n_steps` = 8 × 256 = 2048 transições (cerca de 110 partidas), com `batch_size=128` e `ent_coef=0.01`. O `truco_ppo_1M` foi treinado com a configuração antiga (`n_steps=512`, `batch_size=32`, um env, só contra o aleatório), que continua gravada dentro do zip.
+
+### Treino em liga
+
+A cada partida o `LeagueEnv` sorteia o oponente conforme `DEFAULT_LEAGUE` (aleatório, regra, um snapshot anterior, pesos mais recentes), e o aprendiz joga em um lado sorteado. Snapshots são salvos a cada `snapshot_every` passos e entram no pool. A cada `eval_every` passos, o checkpoint é avaliado na arena com 500 partidas contra cada oponente fixo (aleatório, regra, o snapshot anterior e o `truco_ppo_1M`). As mãos vêm do espaço de avaliação, disjunto do de treino, e cada uma é jogada dos dois lados. As avaliações rodam em processos separados.
+
+```bash
+cd backend
+python -m agent.train --name liga_v2 --steps 3000000 --obs v2 --seed 0
+# variações
+python -m agent.train --name liga_v1 --obs v1
+python -m agent.train --league random=0.2,rule=0.4,snapshot=0.2,latest=0.2
+python -m agent.train --hp ent_coef=0.01 --hp learning_rate=0.0001
+python -m agent.train --help
+```
+
+Com 8 envs, o treino faz cerca de 2 000 passos/s numa CPU de desktop, avaliações incluídas. 3M de passos levam uns 30 minutos.
+
+Cada execução cria `runs/<data>-<nome>/`:
+
+| Arquivo | Conteúdo |
+|---|---|
+| `config.json` | TrainConfig completo, semente, commit do git (e se havia alterações locais), versões das bibliotecas |
+| `run.json` | status, passos, melhor checkpoint |
+| `metrics.jsonl` | uma linha por avaliação: estatísticas de treino (vitórias por tipo de oponente, recompensa, entropia, truco, corrida, KL…) e resultado da arena por oponente com IC 95% |
+| `checkpoints/step_*.zip` | snapshots (também o pool da liga) |
+| `best.zip`, `final.zip`, `latest.zip` | melhor pela avaliação, último, pesos do oponente "mais recente" |
+
+O modelo de produção, `models/truco_liga_v2.zip`, é o `best.zip` da run `liga_v2_ent001_3M` (observação v2, `ent_coef=0.01`, melhor checkpoint em 1,3M passos). Para publicar outro, copie o zip para `backend/models/`: ele aparece no seletor de oponente. Para trocar o default, altere `LEVELS["impossivel"]` em `backend/api/players.py`.
+
+---
+
+## Arena (`backend/arena/`)
+
+Roda partidas offline entre quaisquer dois jogadores. Cada semente de avaliação é jogada duas vezes, trocando os lados, em processos paralelos, e o resultado não depende do número de workers.
+
+```bash
+cd backend
+python -m arena.run --a ppo:models/truco_ppo_1M.zip --b random --games 1000 --seed 123
+python -m arena.run --a ppo:runs/<id>/best.zip --b ppo:truco_ppo_1M --games 2000
+python -m arena.tournament --games 500                    # todos os models/*.zip x random, rule
+python -m arena.tournament --checkpoints "runs/<id>/checkpoints/*.zip" --opponents random rule ppo:truco_ppo_1M
+```
+
+Saída: taxa de vitória de A com IC de Wilson, vitória por lado, pontos por mão, trucos por mão, fração de corridas por aposta enfrentada, ações ilegais, fallbacks e erros. Os arquivos `summary.json` e `decisions.jsonl` (estado, ação e resultado da mão de cada decisão) ficam em `arena_results/`.
+
+### Jogadores (specs)
+
+| Spec | Jogador |
+|---|---|
+| `random` | Uniforme sobre as ações legais |
+| `rule` | Heurística: joga a maior carta com mão boa, pede truco com mão muito boa, corre de aposta com mão fraca |
+| `ppo:<caminho ou nome>` | Checkpoint MaskablePPO, com argmax (`ppo:truco_ppo_1M` = `models/truco_ppo_1M.zip`) |
+| `ppo-stoch:<…>` | Mesmo checkpoint, amostrando a ação |
+| `py:<módulo>:<Classe>[:arg]` | Qualquer classe importável (só pela CLI, nunca pela API) |
+
+### Plugar um jogador novo (ex.: Jev)
+
+Um jogador precisa de `name` e `decide(game, seat) -> int` (0–6). A arena conta ações ilegais e usa a primeira legal como fallback. `reset(match_key)` é opcional.
+
+```python
+# backend/jev_player.py
+from arena.players import ArenaPlayer
+from truco.encoding import legal_action_ids
+
+class JevPlayer(ArenaPlayer):
+    name = "jev"
+    def __init__(self, endpoint: str = "http://localhost:9000"):
+        self.endpoint = endpoint
+    def decide(self, game, seat) -> int:
+        legal = legal_action_ids(game, seat)
+        ...  # consultar o modelo externo; usar só as cartas do próprio seat
+        return legal[0]
+```
+
+```bash
+python -m arena.run --a py:jev_player:JevPlayer --b ppo:truco_ppo_1M --games 1000
+```
+
+Para que a API e o frontend também o aceitem, registre um prefixo com `register_player("jev", lambda arg: JevPlayer(arg))` e libere-o em `resolve_spec` (`backend/api/players.py`).
+
+### Controles de sanidade (testes)
+
+Estão em `tests/test_arena.py`: aleatório contra aleatório fica perto de 50%, regra contra regra e PPO contra ela mesma dão exatamente 50% (políticas determinísticas com troca de lado), a regra vence o aleatório, e o resultado em série é igual ao paralelo.
+
+---
+
+## API (`http://localhost:8000`)
+
+### Jogo
+
+| Método | Endpoint | Descrição |
+|---|---|---|
+| `POST` | `/game/new` | `{ opponent? }`: nível (`facil` = aleatório, `medio` = regra, `dificil` = `truco_ppo_1M`, `impossivel` = `truco_liga_v2`), `random`, `rule` ou `ppo:models/<zip>` / `ppo:runs/<id>/<zip>`; default `impossivel` |
+| `POST` | `/game/action` | `{ game_id, action: 0–6 }`; executa a ação do humano e os turnos da IA |
+| `GET` | `/game/state?game_id=` | Estado atual. Inclui `opponent`, `stats` (trucos, aumentos, aceites e corridas por lado) e `p1_cards_left`. As cartas da IA nunca são enviadas |
+| `POST` | `/game/continue` | Com `ai_pending=true` (uma rodada fechou e a IA abre a próxima), faz a IA jogar; o frontend chama após 3 s para a rodada encerrada ficar visível na mesa |
+| `POST` | `/game/next-hand` | Avança após `hand_ending=true` |
+| `GET` | `/health` | Health check |
+
+### Treino, runs e arena
+
+| Método | Endpoint | Descrição |
+|---|---|---|
+| `POST` | `/train/start` | Treino em liga numa thread do servidor: `{ total_timesteps, name, obs_version, league?, eval_every, eval_games, init_from_run? }` |
+| `POST` | `/train/pause` | Encerra a run (status `stopped`, salva `final.zip`) |
+| `POST` | `/train/reset` | Encerra e limpa o estado em memória (as runs em disco ficam) |
+| `GET` | `/train/status` | `running`, `run_id`, `timestep`, `latest_metric` (formato antigo) e `latest` (métrica completa) |
+| `WS` | `/ws/metrics` | Métricas e status a cada 2 s |
+| `GET` | `/runs` | Runs com config, duração, passos, melhor checkpoint e última avaliação |
+| `GET` | `/runs/{id}` · `/metrics?since=N` · `/checkpoints` · `/matrix` | Detalhes, métricas, checkpoints e matriz checkpoints × oponentes |
+| `GET` | `/arena/players` | Jogadores aceitos (níveis, `models/`, runs) |
+| `POST` | `/arena/jobs` | `{ a, b, games, seed, run_id? }`: enfileira um confronto (processos separados) |
+| `GET` | `/arena/jobs`, `/arena/jobs/{id}` | Progresso e resultado; com `run_id`, o resultado entra na matriz da run |
+
+### Ações
+
+| ID | Nome | Quando |
+|---|---|---|
+| 0–2 | Jogar a carta 0/1/2 | Turno de jogo |
+| 3 | Pedir truco | Sem aposta pendente e sem trava |
+| 4 | Aceitar | Aposta pendente ou decisão da mão de 11 |
+| 5 | Correr | Aposta pendente ou decisão da mão de 11 |
+| 6 | Aumentar | Aposta pendente com próximo valor disponível |
+
+---
+
+## Frontend
+
+- **`/runs`**: execuções com config, duração, passos, melhor checkpoint e última avaliação. Marque até 4 para comparar no mesmo gráfico, contra o conjunto fixo ou um oponente específico.
+- **`/runs/[id]`**: mostra:
+  - taxa de vitória por oponente com banda de IC;
+  - treino × avaliação (recompensa ou vitória contra um mesmo oponente), com aviso quando divergem;
+  - entropia, taxa de truco e taxa de corrida;
+  - força por passo (conjunto fixo e Elo ajustado com o aleatório em 0);
+  - matriz de confrontos, com um botão para avaliar qualquer checkpoint contra outro oponente.
+- **`/arena`**: escolha dois jogadores, o número de partidas e a semente. Acompanhe o progresso e veja o resultado com IC e as estatísticas por lado.
+- **`/play`**: tabuleiro com seletor de oponente e resumo de trucos e corridas no fim da partida.
+- **`/watch`**: inicia, para e acompanha um treino dentro do servidor.
+
+---
+
+## Rodando localmente
 
 ### Backend
-- Python **3.10+**
-- pip
+
+```bash
+cd backend
+python -m venv .venv
+.venv/Scripts/activate            # Windows (Linux/macOS: source .venv/bin/activate)
+pip install -r requirements-dev.txt
+uvicorn main:app --reload
+python -m pytest                  # testes
+```
+
+O `requirements.txt` fixa `torch==2.7.0+cpu`, que só tem wheels até Python 3.13. Em Python 3.14, instale o torch CPU mais recente antes (`pip install torch --index-url https://download.pytorch.org/whl/cpu`) e depois as demais dependências.
 
 ### Frontend
-- Node.js **18+**
-- npm **9+**
-
----
-
-## Instalação e execução local
-
-### 1. Backend
-
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload
-```
-
-API disponível em `http://localhost:8000`.
-
-### 2. Treinar o modelo
-
-O checkpoint fica em `backend/models/truco_ppo_1M.zip`. Para gerá-lo:
-
-```bash
-cd backend
-python train_all.py
-```
-
-Isso treina o modelo com **1 000 000 de timesteps** e salva em `models/truco_ppo_1M.zip`.
-
-### 3. Frontend
-
-Crie o arquivo `frontend/.env.local` apontando para o backend local:
-
-```
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
-
-Em seguida:
 
 ```bash
 cd frontend
+echo NEXT_PUBLIC_API_URL=http://localhost:8000 > .env.local
 npm install
 npm run dev
 ```
 
-App disponível em `http://localhost:3000`.
+---
+
+## Variáveis de ambiente
+
+| Serviço | Variável | Default | Para quê |
+|---|---|---|---|
+| backend | `PORT` | injetada pelo Railway | Porta do uvicorn |
+| backend | `TRUCO_RUNS_DIR` | `backend/runs` | Onde ficam as runs; aponte para um volume persistente em produção |
+| backend | `TRUCO_ARENA_DIR` | `backend/arena_results` | Resultados da arena e dos jobs da API; idem |
+| backend | `TRUCO_ARENA_WORKERS` | `2` | Processos usados pelos jobs de arena e pelas avaliações do treino via API |
+| frontend | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | URL pública do backend (embutida no build) |
 
 ---
 
 ## Deploy no Railway
 
-O Railway hospeda os dois serviços de forma independente a partir do mesmo repositório, cada um com seu `railway.toml` e `Procfile`. O Nixpacks detecta Python pelo `requirements.txt` e Node pelo `package.json`.
+Dois serviços a partir do mesmo repositório, cada um com seu `railway.toml` e `Procfile`:
 
-### 1. Backend
+1. **Backend**: Root Directory = `backend`. O health check é `/health`. Sem volume, `runs/` e `arena_results/` somem a cada deploy. Para mantê-los, crie um volume (ex.: montado em `/data`) e defina `TRUCO_RUNS_DIR=/data/runs` e `TRUCO_ARENA_DIR=/data/arena_results`.
+2. **Frontend**: Root Directory = `frontend`, com `NEXT_PUBLIC_API_URL` apontando para o backend. É preciso fazer redeploy se a URL mudar.
 
-1. **New Project → Deploy from GitHub repo** → selecione o repositório → **Root Directory = `backend`**.
-2. A variável `PORT` é **injetada automaticamente** pelo Railway; o `Procfile` já a utiliza.
-3. O health check está configurado em `/health` via `railway.toml`.
-4. Aguarde o build e anote a URL pública gerada (ex.: `https://truco-backend.up.railway.app`).
+Observações:
+- Faça o deploy de backend e frontend juntos. O payload de `/game/*` mudou (`mao11_player` no lugar de `open_hand_for`, sem `p1_hand`).
+- O treino via `/train/start` roda numa thread do servidor e disputa CPU com o jogo. Para treinos longos, rode `python -m agent.train` localmente e publique o zip em `models/`.
+- As partidas ficam em memória: reiniciar o serviço descarta as partidas em andamento.
 
-> **Atenção**: os checkpoints em `backend/models/` precisam estar commitados no repositório ou gerados em um build step, pois o Railway não persiste volumes por padrão no plano gratuito. Para treinos longos prefira gerar os `.zip` localmente e commitá-los.
+---
 
-### 2. Frontend
+## Resultados na arena
 
-1. **New Service** no mesmo projeto → mesmo repositório → **Root Directory = `frontend`**.
-2. Adicione a variável de ambiente na **UI do Railway**:
-   - `NEXT_PUBLIC_API_URL` = URL pública do backend (ex.: `https://truco-backend.up.railway.app`)
-3. O health check está configurado em `/` via `railway.toml`.
-4. Após o build, abra a URL do frontend e jogue.
+Taxa de vitória do jogador da linha, com IC 95%. Os números usam 1000 partidas por confronto e `--seed 777`: mãos diferentes das usadas para escolher o `best.zip` de cada run (semente 123), para não inflar o resultado. Cada mão é jogada dos dois lados. As runs de liga têm 3M passos e semente 0; o checkpoint é o `best.zip` de cada uma.
 
-### Observações
+| Jogador | vs Aleatório | vs Regra | vs PPO 1M | vs liga v1 | vs liga v2 ent 0.01 |
+|---|---|---|---|---|---|
+| Regra | 83,5%¹ | — | 75,8% [73–78] | — | — |
+| PPO 1M (modelo anterior, v1, só contra aleatório) | 66,1% [63–69] | 24,2% [22–27] | 50% | 35,9% [33–39] | 33,0% [30–36] |
+| liga v1 (`ent_coef=0.05`), best em 1,2M | 67,8% [65–71] | **61,2%** [58–64] | 64,1% [61–67] | 50% | 42,0% [39–45] |
+| liga v2 (`ent_coef=0.05`), best em 600k | 69,8% [67–73] | 39,1% [36–42] | 60,5% [57–63] | 52,5% [49–56] | 46,1% [43–49] |
+| liga v2 (`ent_coef=0.01`), best em 1,3M = **`truco_liga_v2` (produção)** | **76,5%** [74–79] | 48,9% [46–52] | **67,0%** [64–70] | **58,0%** [55–61] | 50% |
+| liga v1 (`ent_coef=0.01`), best em 400k | 67,5% [65–70] | 56,7% [54–60] | 60,3% [57–63] | 43,2% [40–46] | 41,5% [38–45] |
 
-- Variáveis `NEXT_PUBLIC_*` são embutidas no build do Next.js. Se a URL do backend mudar, é necessário um **redeploy do frontend**.
-- O backend armazena partidas **em memória** (dicionário Python). Reiniciar o serviço descarta partidas em andamento.
-- O treino roda em uma **thread daemon** dentro do processo do servidor. Para treinos longos, prefira um plano com mais memória ou rode o treino localmente e suba apenas os checkpoints.
+¹ `--seed 123`.
 
+Leitura:
+- A correção da semente mais o treino em liga levam todos os modelos novos acima do PPO 1M, com folga contra a regra (de 24% para 39–61%).
+- Com `ent_coef=0.05`, a entropia fica perto de 0,7 durante todo o treino e o desempenho estaciona cedo. Com `0.01`, a v2 é a mais forte no geral: vence o PPO 1M, a liga v1 e o aleatório com margem.
+- Com `ent_coef=0.01` nos dois, a observação v2 vence a v1 no confronto direto (58,5%). Baixar a entropia ajudou a v2, mas não a v1. Todas as runs usam uma única semente de treino, então diferenças de poucos pontos não são conclusivas.
+- As forças não são transitivas: a liga v1 é a que mais bate a regra, mas perde o confronto direto para a v2 com `0.01`. Por isso a avaliação usa vários oponentes e o Elo da página da run.
 
 ## Disclaimer
 
-- p.s.: A IA sabe roubar e blefar!
+- p.s.: A IA blefa e, na mão de ferro, joga vendo as próprias cartas enquanto você joga no escuro.

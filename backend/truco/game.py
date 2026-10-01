@@ -10,10 +10,14 @@ Manilha tiebreak by suit: Clubs > Hearts > Spades > Diamonds.
 Match: best to 12 points.
 Hand (mão): best of 3 rounds. Points awarded depend on the current stake
     (1 -> 3 -> 6 -> 9 -> 12) when "truco" is escalated.
-Mão de 11: when one team has 11 points, the next hand is played open
-    and worth a fixed 1 point (no truco allowed).
-Mão de 10 (iron hand): when both teams have 11 points, hand is worth 1 point
-    and players play with hidden cards (no truco).
+Round ties: a tied first round is decided by the next decided round; a tie
+    after a decided first round goes to the winner of the first round; three
+    ties score nothing.
+Mão de 11: when exactly one player has 11 points, that player looks at their
+    own cards and decides before anything is played: play (the hand is worth
+    3) or run (the opponent scores 1). No truco in this hand.
+Mão de ferro (iron hand): both players at 11. Worth 3 points, no truco. The
+    web UI hides the human's cards; the agent still sees its own (house rule).
 """
 
 from __future__ import annotations
@@ -192,16 +196,18 @@ class Hand:
     # the original active player resumes — a plain flip of current_player is
     # only correct after a single call/accept pair.
     pre_truco_player: Optional[Player] = None
-    # Mão de 11: opponent of the player at 11 must accept (play for 3) or run
-    # (concede 1) before any card is played. While True, current_player is the
-    # responder.
+    # Mão de 11: the player at 11 must accept (play for 3) or run (opponent
+    # scores 1) before any card is played. While True, current_player is the
+    # player at 11.
     awaiting_mao11_response: bool = False
     # Result
     winner: Optional[Player] = None
     folded: bool = False
+    # Three tied rounds: the hand ends and nobody scores.
+    drawn: bool = False
 
     def is_over(self) -> bool:
-        return self.winner is not None
+        return self.winner is not None or self.drawn
 
 
 @dataclass
@@ -213,7 +219,7 @@ class GameState:
     winner: Optional[Player] = None
     # Special hand modes (computed when hand starts)
     iron_hand: bool = False      # both at 11 — fixed 3 points, no truco
-    open_hand_for: Optional[Player] = None  # this player has 11 — opp sees their cards
+    mao11_player: Optional[Player] = None  # the player at 11 (Mão de 11), who decides
 
 
 class TrucoGame:
@@ -250,33 +256,35 @@ class TrucoGame:
         p1_at_11 = s.scores[1] == self.TARGET_SCORE - 1
         s.iron_hand = p0_at_11 and p1_at_11
         if s.iron_hand:
-            s.open_hand_for = None
+            s.mao11_player = None
         elif p0_at_11:
-            s.open_hand_for = Player.P0
+            s.mao11_player = Player.P0
         elif p1_at_11:
-            s.open_hand_for = Player.P1
+            s.mao11_player = Player.P1
         else:
-            s.open_hand_for = None
+            s.mao11_player = None
 
         initial_stake = 3 if s.iron_hand else 1
-        awaiting = s.open_hand_for is not None
-        responder = other(s.open_hand_for) if s.open_hand_for is not None else first
+        awaiting = s.mao11_player is not None
 
         s.hand = Hand(
             vira=vira,
             hands={Player.P0: p0_cards, Player.P1: p1_cards},
             first_to_play=first,
-            current_player=responder if awaiting else first,
+            # Mão de 11: the player at 11 decides before the hand starts.
+            current_player=s.mao11_player if awaiting else first,
             stake=initial_stake,
             awaiting_mao11_response=awaiting,
         )
 
-    def _finish_hand(self, winner: Player, points: int) -> None:
+    def _finish_hand(self, winner: Optional[Player], points: int) -> None:
+        """Score the hand (``winner=None`` for a drawn hand) and deal the next."""
         s = self.state
-        s.scores[int(winner)] += points
-        if s.scores[int(winner)] >= self.TARGET_SCORE:
-            s.winner = winner
-            return
+        if winner is not None:
+            s.scores[int(winner)] += points
+            if s.scores[int(winner)] >= self.TARGET_SCORE:
+                s.winner = winner
+                return
         # Alternate dealer for next hand.
         s.dealer = other(s.dealer)
         self._start_hand()
@@ -292,7 +300,7 @@ class TrucoGame:
         actions: List[PlayerAction] = []
 
         if h.awaiting_mao11_response:
-            # Only the responder may accept (play for 3) or run (concede 1).
+            # The player at 11 plays (hand worth 3) or runs (opponent gets 1).
             actions.append(PlayerAction(ActionType.ACCEPT))
             actions.append(PlayerAction(ActionType.RUN))
             return actions
@@ -315,13 +323,8 @@ class TrucoGame:
 
     def _truco_disabled(self) -> bool:
         s = self.state
-        # Iron hand never allows raises. While the Mão de 11 response is
-        # pending, no truco call is possible either.
-        if s.iron_hand:
-            return True
-        if s.hand is not None and s.hand.awaiting_mao11_response:
-            return True
-        return False
+        # Neither the iron hand nor the Mão de 11 allow truco.
+        return s.iron_hand or s.mao11_player is not None
 
     def _can_call_truco(self) -> bool:
         s = self.state
@@ -408,9 +411,12 @@ class TrucoGame:
             rnd.result = RoundResult.TIE
             next_leader = h.first_to_play  # tied round: first-to-play stays leader
 
-        winner = self._check_hand_winner()
-        if winner is not None:
-            h.winner = winner
+        decided, winner = self._hand_outcome()
+        if decided:
+            if winner is None:
+                h.drawn = True
+            else:
+                h.winner = winner
             self._finish_hand(winner, h.stake)
             return
 
@@ -419,17 +425,15 @@ class TrucoGame:
         h.current_player = next_leader
         h.first_to_play = next_leader
 
-    def _check_hand_winner(self) -> Optional[Player]:
-        """Decide the hand winner based on completed rounds. None if undecided.
+    def _hand_outcome(self) -> Tuple[bool, Optional[Player]]:
+        """Decide the hand from completed rounds.
 
-        Truco best-of-3 with tie shortcuts:
+        Returns ``(decided, winner)``; ``winner`` is None for a drawn hand.
+        Truco Paulista best-of-3 with ties:
             - 2 round wins → take the hand.
-            - Round 1 tied, round 2 has a winner → that winner takes the hand
-              immediately (no round 3).
-            - Round 2 tied, round 1 had a winner → round 1 winner takes the
-              hand immediately.
-            - Rounds 1 and 2 both tied → round 3 decides.
-            - All three tied → the hand-leader (first_to_play) wins.
+            - Round 1 tied → the next decided round takes the hand.
+            - Round 1 decided, a later round tied → round 1 winner takes it.
+            - All three tied → nobody scores.
         """
         h = self.state.hand
         results = [r.result for r in h.rounds if r.is_complete()]
@@ -441,29 +445,28 @@ class TrucoGame:
                 wins[1] += 1
 
         if wins[0] >= 2:
-            return Player.P0
+            return True, Player.P0
         if wins[1] >= 2:
-            return Player.P1
+            return True, Player.P1
         if len(results) < 2:
-            return None
+            return False, None
 
-        # Apply early-resolution tie rules after round 2 completes.
-        r1, r2 = results[0], results[1]
-        if r1 == RoundResult.TIE and r2 != RoundResult.TIE:
-            return Player.P0 if r2 == RoundResult.P0_WIN else Player.P1
-        if r2 == RoundResult.TIE and r1 != RoundResult.TIE:
-            return Player.P0 if r1 == RoundResult.P0_WIN else Player.P1
-        # Both r1 and r2 tied → round 3 decides.
-        if len(results) < 3:
-            return None
+        def winner_of(r: RoundResult) -> Player:
+            return Player.P0 if r == RoundResult.P0_WIN else Player.P1
 
-        # All three played and still undecided (only possible if r1 and r2
-        # both tied). The third round, if non-tied, wins it; if all three
-        # tied, the original leader takes the hand.
-        r3 = results[2]
-        if r3 != RoundResult.TIE:
-            return Player.P0 if r3 == RoundResult.P0_WIN else Player.P1
-        return h.first_to_play
+        r1, later = results[0], results[1:]
+        if r1 == RoundResult.TIE:
+            decided = [r for r in later if r != RoundResult.TIE]
+            if decided:
+                return True, winner_of(decided[0])
+            if len(results) < 3:
+                return False, None
+            return True, None
+        # Round 1 was decided: any tie afterwards hands it to its winner.
+        if RoundResult.TIE in later:
+            return True, winner_of(r1)
+        # 1-1 after two rounds: round 3 decides.
+        return False, None
 
     # -------- Truco handling --------
     def _handle_call_truco(self) -> None:
@@ -484,7 +487,7 @@ class TrucoGame:
         s = self.state
         h = s.hand
         if h.awaiting_mao11_response:
-            # Mão de 11: responder accepts to play the hand worth 3 points.
+            # Mão de 11: the player at 11 chooses to play for 3 points.
             h.stake = 3
             h.awaiting_mao11_response = False
             h.current_player = h.first_to_play
@@ -508,8 +511,8 @@ class TrucoGame:
         s = self.state
         h = s.hand
         if h.awaiting_mao11_response:
-            # Mão de 11: responder concedes 1 point to the player at 11.
-            winner = s.open_hand_for
+            # Mão de 11: the player at 11 gives up; the opponent scores 1.
+            winner = other(s.mao11_player)
             h.folded = True
             h.winner = winner
             self._finish_hand(winner, 1)
