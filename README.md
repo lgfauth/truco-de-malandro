@@ -1,10 +1,33 @@
-# Truco de Malandro
+# 🃏 Truco de Malandro
 
-Agente de aprendizado por reforço que joga **Truco Paulista** *heads-up* (1 vs 1). O agente é treinado com **MaskablePPO** (ações mascaradas: só ações legais são exploradas) em uma **liga de oponentes**, medido numa **arena offline** com intervalos de confiança e disponibilizado via API REST + WebSocket. O frontend mostra como o treino influencia a força da IA e permite jogar contra ela.
+> *"TRUCO, ladrão!"* — uma IA que aprendeu a blefar sozinha, na base da porrada.
+
+<p align="center">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white">
+  <img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-2.7-EE4C2C?logo=pytorch&logoColor=white">
+  <img alt="Stable-Baselines3" src="https://img.shields.io/badge/Stable--Baselines3-MaskablePPO-5A4FCF">
+  <img alt="Gymnasium" src="https://img.shields.io/badge/Gymnasium-RL-0081A5">
+  <br>
+  <img alt="Next.js" src="https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs&logoColor=white">
+  <img alt="React" src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white">
+  <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind_CSS-3-06B6D4?logo=tailwindcss&logoColor=white">
+  <img alt="Recharts" src="https://img.shields.io/badge/Recharts-gráficos-22B5BF">
+  <img alt="Railway" src="https://img.shields.io/badge/Deploy-Railway-0B0D0E?logo=railway&logoColor=white">
+</p>
+
+<p align="center">
+  <img src="docs/images/jogando.png" alt="Partida de truco contra a IA: mesa verde, placar, vira e manilha, histórico de trucos aceitos" width="820">
+</p>
+
+Senta, embaralha e se prepara: aqui o adversário é um agente de **aprendizado por reforço** que joga **Truco Paulista** *heads-up* (1 vs 1). Ele foi criado com **MaskablePPO** (só tenta jogadas legais, nada de esconder carta na manga), treinado numa **liga de oponentes** que inclui versões antigas dele mesmo, testado numa **arena** com intervalo de confiança e servido por API REST + WebSocket.
+
+No frontend dá pra ver o bicho aprendendo, botar modelos pra se enfrentarem e, claro, sentar na mesa e tomar um truco na cara.
 
 ---
 
-## O que o projeto entrega
+## 🎴 O que tem na mesa
 
 | Funcionalidade | Descrição |
 |---|---|
@@ -19,7 +42,7 @@ Agente de aprendizado por reforço que joga **Truco Paulista** *heads-up* (1 vs 
 
 ---
 
-## Estrutura do projeto
+## 🗂️ Onde fica cada carta
 
 ```
 truco-de-malandro/
@@ -52,9 +75,10 @@ truco-de-malandro/
 │   │   └── players.py          # Níveis e validação das referências de jogador
 │   ├── models/                 # Checkpoints publicados (truco_liga_v2.zip é o de produção)
 │   └── tests/                  # pytest
+├── docs/images/                # Screenshots deste README
 └── frontend/
     ├── app/                    # /, /play, /watch, /runs, /runs/[id], /arena
-    ├── components/             # ui.tsx, charts.tsx, arena.tsx
+    ├── components/             # ui.tsx, charts.tsx, arena.tsx, game/
     ├── lib/                    # api.ts, format.ts, elo.ts
     ├── types/                  # game.ts, runs.ts
     └── hooks/useTrucoSounds.ts
@@ -62,29 +86,35 @@ truco-de-malandro/
 
 ---
 
-## Regras implementadas
+## 📜 Regras da casa
+
+Truco Paulista raiz, do jeito que se joga no boteco (só que sem cerveja derramada no baralho):
 
 - **Força das cartas** (sem manilha): 3 > 2 > A > K > J > Q > 7 > 6 > 5 > 4.
-- **Manilha**: o rank seguinte à vira na ordem cíclica 4,5,6,7,Q,J,K,A,2,3; entre manilhas vale o naipe (Paus > Copas > Espadas > Ouros).
+- **Manilha**: o rank seguinte à vira na ordem cíclica 4,5,6,7,Q,J,K,A,2,3; entre manilhas vale o naipe (Paus > Copas > Espadas > Ouros). Sim, o zap continua sendo o rei da mesa.
 - **Apostas**: 1 → 3 → 6 → 9 → 12. Quem pede truco não pode aumentar de novo até o adversário aumentar. Correr dá ao outro o valor anterior ao pedido. Não se pode pedir um valor que ultrapasse o necessário para fechar a partida.
-- **Empates de rodada**: empate na 1ª → quem ganhar a próxima rodada decidida leva a mão. Vitória na 1ª e empate depois → leva quem ganhou a 1ª. Três empates → ninguém pontua.
+- **Empates de rodada** (a famosa "cangou"): empate na 1ª → quem ganhar a próxima rodada decidida leva a mão. Vitória na 1ª e empate depois → leva quem ganhou a 1ª. Três empates → ninguém pontua.
 - **Mão de 11**: quando só um jogador tem 11, ele olha as próprias cartas e decide antes de jogar: aceita (a mão vale 3) ou corre (o adversário ganha 1). Ninguém vê as cartas do outro e não há truco nessa mão.
-- **Mão de ferro** (ambos com 11): vale 3 pontos, sem truco. Regra da casa: a interface esconde as cartas do humano, mas a IA vê as dela.
+- **Mão de ferro** (ambos com 11): vale 3 pontos, sem truco. Regra da casa: a interface esconde as cartas do humano, mas a IA vê as dela. A casa sempre leva vantagem. 😏
 
 ---
 
-## Observação do agente (`truco/obs.py`)
+## 👀 O que a IA enxerga (`truco/obs.py`)
 
-`observe(game, player, version)` é a única função que monta a visão de um jogador; nunca inclui cartas escondidas do adversário (há teste para isso).
+`observe(game, player, version)` é a única função que monta a visão de um jogador e **nunca** inclui as cartas escondidas do adversário. Tem teste garantindo: aqui ninguém espia a mão alheia.
 
 - **v1** (24 floats): layout original, com cada carta como um escalar `(id+1)/40`. É a versão dos checkpoints `truco_ppo_*`.
 - **v2** (174 floats): cada carta da mão com rank e naipe em one-hot, força relativa à vira e flag de manilha. Inclui ainda a vira e o rank da manilha; a mesa (quem jogou, força, manilha); o resultado de cada rodada; a rodada atual e a carta a bater; as 40 cartas já vistas; o placar; a aposta atual e a pendente em one-hot; flags de mão de 11, mão de ferro, turno, pé, se pode aumentar e se fez o pedido pendente; e as cartas restantes de cada lado.
 
-O `PPOPlayer` detecta a versão pelo tamanho da entrada do modelo, então checkpoints v1 e v2 convivem na arena e na API.
+O `PPOPlayer` detecta a versão pelo tamanho da entrada do modelo, então checkpoints v1 e v2 sentam na mesma mesa, na arena e na API.
 
 ---
 
-## Treino
+## 🏋️ Treino: a escolinha do malandro
+
+<p align="center">
+  <img src="docs/images/treino.png" alt="Tela de treino: controles, taxa de vitória por oponente, entropia da política e taxa de truco e corrida" width="820">
+</p>
 
 ### Hiperparâmetros
 
@@ -92,7 +122,9 @@ Ficam num único dict, `HYPERPARAMS` em [`backend/agent/config.py`](backend/agen
 
 ### Treino em liga
 
-A cada partida o `LeagueEnv` sorteia o oponente conforme `DEFAULT_LEAGUE` (aleatório, regra, um snapshot anterior, pesos mais recentes), e o aprendiz joga em um lado sorteado. Snapshots são salvos a cada `snapshot_every` passos e entram no pool. A cada `eval_every` passos, o checkpoint é avaliado na arena com 500 partidas contra cada oponente fixo (aleatório, regra, o snapshot anterior e o `truco_ppo_1M`). As mãos vêm do espaço de avaliação, disjunto do de treino, e cada uma é jogada dos dois lados. As avaliações rodam em processos separados.
+Jogar só contra quem joga carta aleatória não forma malandro nenhum. Por isso, a cada partida o `LeagueEnv` sorteia o oponente conforme `DEFAULT_LEAGUE` (aleatório, regra, um snapshot anterior, pesos mais recentes), e o aprendiz joga em um lado sorteado. Snapshots são salvos a cada `snapshot_every` passos e entram no pool: a IA passa a apanhar das versões antigas dela mesma até aprender.
+
+A cada `eval_every` passos, o checkpoint é avaliado na arena com 500 partidas contra cada oponente fixo (aleatório, regra, o snapshot anterior e o `truco_ppo_1M`). As mãos vêm do espaço de avaliação, disjunto do de treino, e cada uma é jogada dos dois lados. As avaliações rodam em processos separados.
 
 ```bash
 cd backend
@@ -104,7 +136,13 @@ python -m agent.train --hp ent_coef=0.01 --hp learning_rate=0.0001
 python -m agent.train --help
 ```
 
-Com 8 envs, o treino faz cerca de 2 000 passos/s numa CPU de desktop, avaliações incluídas. 3M de passos levam uns 30 minutos.
+Com 8 envs, o treino faz cerca de 2 000 passos/s numa CPU de desktop, avaliações incluídas. 3M de passos levam uns 30 minutos: dá tempo de jogar umas mãos enquanto isso.
+
+### Runs
+
+<p align="center">
+  <img src="docs/images/runs.png" alt="Lista de runs de treino com config, passos, duração e melhor checkpoint, e gráfico comparando duas runs" width="820">
+</p>
 
 Cada execução cria `runs/<data>-<nome>/`:
 
@@ -120,9 +158,13 @@ O modelo de produção, `models/truco_liga_v2.zip`, é o `best.zip` da run `liga
 
 ---
 
-## Arena (`backend/arena/`)
+## ⚔️ Arena: quem é o malandro de verdade?
 
-Roda partidas offline entre quaisquer dois jogadores. Cada semente de avaliação é jogada duas vezes, trocando os lados, em processos paralelos, e o resultado não depende do número de workers.
+<p align="center">
+  <img src="docs/images/arena.png" alt="Tela da arena: confronto entre dois modelos com taxa de vitória, IC 95% e estatísticas por lado" width="820">
+</p>
+
+Coloca dois jogadores frente a frente, offline, e deixa a estatística decidir. Cada semente de avaliação é jogada duas vezes, trocando os lados (nada de culpar a sorte das cartas), em processos paralelos, e o resultado não depende do número de workers.
 
 ```bash
 cd backend
@@ -134,17 +176,17 @@ python -m arena.tournament --checkpoints "runs/<id>/checkpoints/*.zip" --opponen
 
 Saída: taxa de vitória de A com IC de Wilson, vitória por lado, pontos por mão, trucos por mão, fração de corridas por aposta enfrentada, ações ilegais, fallbacks e erros. Os arquivos `summary.json` e `decisions.jsonl` (estado, ação e resultado da mão de cada decisão) ficam em `arena_results/`.
 
-### Jogadores (specs)
+### Os jogadores (specs)
 
 | Spec | Jogador |
 |---|---|
-| `random` | Uniforme sobre as ações legais |
-| `rule` | Heurística: joga a maior carta com mão boa, pede truco com mão muito boa, corre de aposta com mão fraca |
+| `random` | O pato: uniforme sobre as ações legais |
+| `rule` | O tio do boteco: joga a maior carta com mão boa, pede truco com mão muito boa, corre de aposta com mão fraca |
 | `ppo:<caminho ou nome>` | Checkpoint MaskablePPO, com argmax (`ppo:truco_ppo_1M` = `models/truco_ppo_1M.zip`) |
 | `ppo-stoch:<…>` | Mesmo checkpoint, amostrando a ação |
 | `py:<módulo>:<Classe>[:arg]` | Qualquer classe importável (só pela CLI, nunca pela API) |
 
-### Plugar um jogador novo (ex.: Jev)
+### Chamando um jogador novo pra mesa (ex.: Jev)
 
 Um jogador precisa de `name` e `decide(game, seat) -> int` (0–6). A arena conta ações ilegais e usa a primeira legal como fallback. `reset(match_key)` é opcional.
 
@@ -171,11 +213,11 @@ Para que a API e o frontend também o aceitem, registre um prefixo com `register
 
 ### Controles de sanidade (testes)
 
-Estão em `tests/test_arena.py`: aleatório contra aleatório fica perto de 50%, regra contra regra e PPO contra ela mesma dão exatamente 50% (políticas determinísticas com troca de lado), a regra vence o aleatório, e o resultado em série é igual ao paralelo.
+Estão em `tests/test_arena.py`: aleatório contra aleatório fica perto de 50%, regra contra regra e PPO contra ela mesma dão exatamente 50% (políticas determinísticas com troca de lado), a regra vence o aleatório, e o resultado em série é igual ao paralelo. Baralho viciado não passa.
 
 ---
 
-## API (`http://localhost:8000`)
+## 🔌 API (`http://localhost:8000`)
 
 ### Jogo
 
@@ -208,29 +250,29 @@ Estão em `tests/test_arena.py`: aleatório contra aleatório fica perto de 50%,
 | ID | Nome | Quando |
 |---|---|---|
 | 0–2 | Jogar a carta 0/1/2 | Turno de jogo |
-| 3 | Pedir truco | Sem aposta pendente e sem trava |
-| 4 | Aceitar | Aposta pendente ou decisão da mão de 11 |
-| 5 | Correr | Aposta pendente ou decisão da mão de 11 |
-| 6 | Aumentar | Aposta pendente com próximo valor disponível |
+| 3 | Pedir truco ("TRUCO!") | Sem aposta pendente e sem trava |
+| 4 | Aceitar ("Cai dentro!") | Aposta pendente ou decisão da mão de 11 |
+| 5 | Correr ("Corri…") | Aposta pendente ou decisão da mão de 11 |
+| 6 | Aumentar ("SEIS, marreco!") | Aposta pendente com próximo valor disponível |
 
 ---
 
-## Frontend
+## 🖥️ Frontend
 
+- **`/play`**: a mesa. Escolha o oponente (do pato ao `impossivel`), jogue, peça truco, corra se tiver juízo, e veja o resumo de trucos e corridas no fim da partida.
+- **`/watch`**: inicia, para e acompanha um treino dentro do servidor, com os gráficos atualizando ao vivo.
 - **`/runs`**: execuções com config, duração, passos, melhor checkpoint e última avaliação. Marque até 4 para comparar no mesmo gráfico, contra o conjunto fixo ou um oponente específico.
-- **`/runs/[id]`**: mostra:
+- **`/runs/[id]`**: o raio-x de uma run:
   - taxa de vitória por oponente com banda de IC;
   - treino × avaliação (recompensa ou vitória contra um mesmo oponente), com aviso quando divergem;
   - entropia, taxa de truco e taxa de corrida;
   - força por passo (conjunto fixo e Elo ajustado com o aleatório em 0);
   - matriz de confrontos, com um botão para avaliar qualquer checkpoint contra outro oponente.
 - **`/arena`**: escolha dois jogadores, o número de partidas e a semente. Acompanhe o progresso e veja o resultado com IC e as estatísticas por lado.
-- **`/play`**: tabuleiro com seletor de oponente e resumo de trucos e corridas no fim da partida.
-- **`/watch`**: inicia, para e acompanha um treino dentro do servidor.
 
 ---
 
-## Rodando localmente
+## 🚀 Bora jogar: rodando localmente
 
 ### Backend
 
@@ -254,9 +296,11 @@ npm install
 npm run dev
 ```
 
+Abra http://localhost:3000, escolha o oponente e boa sorte. Você vai precisar.
+
 ---
 
-## Variáveis de ambiente
+## ⚙️ Variáveis de ambiente
 
 | Serviço | Variável | Default | Para quê |
 |---|---|---|---|
@@ -268,7 +312,7 @@ npm run dev
 
 ---
 
-## Deploy no Railway
+## ☁️ Deploy no Railway
 
 Dois serviços a partir do mesmo repositório, cada um com seu `railway.toml` e `Procfile`:
 
@@ -282,7 +326,7 @@ Observações:
 
 ---
 
-## Resultados na arena
+## 🏆 Placar da arena
 
 Taxa de vitória do jogador da linha, com IC 95%. Os números usam 1000 partidas por confronto e `--seed 777`: mãos diferentes das usadas para escolher o `best.zip` de cada run (semente 123), para não inflar o resultado. Cada mão é jogada dos dois lados. As runs de liga têm 3M passos e semente 0; o checkpoint é o `best.zip` de cada uma.
 
@@ -301,8 +345,10 @@ Leitura:
 - A correção da semente mais o treino em liga levam todos os modelos novos acima do PPO 1M, com folga contra a regra (de 24% para 39–61%).
 - Com `ent_coef=0.05`, a entropia fica perto de 0,7 durante todo o treino e o desempenho estaciona cedo. Com `0.01`, a v2 é a mais forte no geral: vence o PPO 1M, a liga v1 e o aleatório com margem.
 - Com `ent_coef=0.01` nos dois, a observação v2 vence a v1 no confronto direto (58,5%). Baixar a entropia ajudou a v2, mas não a v1. Todas as runs usam uma única semente de treino, então diferenças de poucos pontos não são conclusivas.
-- As forças não são transitivas: a liga v1 é a que mais bate a regra, mas perde o confronto direto para a v2 com `0.01`. Por isso a avaliação usa vários oponentes e o Elo da página da run.
+- As forças não são transitivas: a liga v1 é a que mais bate a regra, mas perde o confronto direto para a v2 com `0.01`. Pedra, papel e zap. Por isso a avaliação usa vários oponentes e o Elo da página da run.
 
-## Disclaimer
+---
 
-- p.s.: A IA blefa e, na mão de ferro, joga vendo as próprias cartas enquanto você joga no escuro.
+## ⚠️ Disclaimer
+
+A IA blefa sem pudor e, na mão de ferro, joga vendo as próprias cartas enquanto você joga no escuro. Se perder, a culpa é do baralho. 🃏
