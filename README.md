@@ -6,14 +6,14 @@
   <img alt="Python" src="https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white">
   <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white">
   <img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-2.7-EE4C2C?logo=pytorch&logoColor=white">
-  <img alt="Stable-Baselines3" src="https://img.shields.io/badge/Stable--Baselines3-MaskablePPO-5A4FCF?style=flat">
-  <img alt="Gymnasium" src="https://img.shields.io/badge/Gymnasium-RL-0081A5?style=flat">
+  <img alt="Stable-Baselines3" src="docs/images/badges/stable-baselines3.svg">
+  <img alt="Gymnasium" src="docs/images/badges/gymnasium.svg">
   <br>
   <img alt="Next.js" src="https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs&logoColor=white">
   <img alt="React" src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white">
   <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind_CSS-3-06B6D4?logo=tailwindcss&logoColor=white">
-  <img alt="Recharts" src="https://img.shields.io/badge/Recharts-gr%C3%A1ficos-22B5BF?style=flat">
+  <img alt="Recharts" src="docs/images/badges/recharts.svg">
   <img alt="Railway" src="https://img.shields.io/badge/Deploy-Railway-0B0D0E?logo=railway&logoColor=white">
 </p>
 
