@@ -13,6 +13,7 @@ import {
 } from "@/types/game";
 
 import { CardBack, CardSlot, PlayingCard, RANK_LABEL, manilhaRank } from "./Card";
+import { SoundToggle } from "./SoundControls";
 
 export type HandToast = { message: string; tone: "win" | "lose" | "draw" };
 
@@ -54,6 +55,7 @@ function TopBar({ game, onMenu }: { game: GameStateDTO; onMenu: () => void }) {
           <Chip>Vale {game.stake ?? 1}</Chip>
         )}
       </div>
+      <SoundToggle />
     </header>
   );
 }

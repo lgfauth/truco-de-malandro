@@ -3,6 +3,7 @@
 From ``backend/``::
 
     python -m agent.train --name liga_v2 --steps 3000000
+    python -m agent.train --name cont --init-from runs/<id>/best.zip --hp learning_rate=1e-4
 
 Each run lives in ``runs/<id>/``:
     config.json     TrainConfig, seed, git commit, library versions
@@ -33,11 +34,12 @@ from sb3_contrib import MaskablePPO
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv
 
-from agent.config import TrainConfig, ppo_kwargs
+from agent.config import INIT_OVERRIDABLE, TrainConfig, ppo_kwargs
 from agent.league import CHECKPOINTS_DIR, LATEST_NAME, LeagueEnv, list_snapshots, save_atomic
 from arena.players import as_spec
 from arena.runner import make_executor, run_matchup
 from arena.stats import wilson
+from truco.obs import version_for_dim
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 # Point at a persistent volume in production (e.g. Railway) to keep runs.
@@ -83,6 +85,44 @@ def new_run_dir(name: str, runs_dir: Path) -> Path:
     run_dir = runs_dir / f"{stamp}-{safe}"
     (run_dir / CHECKPOINTS_DIR).mkdir(parents=True, exist_ok=False)
     return run_dir
+
+
+# --- Continuing a checkpoint ---------------------------------------------------
+def checkpoint_obs_version(path: str | Path) -> str:
+    """Observation version a checkpoint was trained with."""
+    from stable_baselines3.common.save_util import load_from_zip_file
+
+    data, _, _ = load_from_zip_file(str(path), device="cpu")
+    return version_for_dim(int(data["observation_space"].shape[0]))
+
+
+def source_snapshots(init_from: str | Path, limit: int) -> List[Path]:
+    """The last ``limit`` snapshots of the run ``init_from`` belongs to.
+
+    For a ``checkpoints/step_*.zip`` source, only snapshots up to it. A
+    checkpoint outside a run (e.g. ``models/``) has none.
+    """
+    path = Path(init_from)
+    in_ckpts = path.parent.name == CHECKPOINTS_DIR
+    run = path.parent.parent if in_ckpts else path.parent
+    if not (run / "run.json").is_file():
+        return []
+    snaps = list_snapshots(run)
+    if in_ckpts:
+        snaps = [s for s in snaps if s.name <= path.name]
+    return snaps[-limit:] if limit > 0 else []
+
+
+def _model_hyperparams(model: MaskablePPO, keys) -> Dict[str, Any]:
+    """The hyperparameters a loaded model actually trains with."""
+    out: Dict[str, Any] = {}
+    for k in keys:
+        if k == "net_arch":
+            out[k] = model.policy_kwargs.get("net_arch", [64, 64])
+        elif hasattr(model, k):
+            v = getattr(model, k)
+            out[k] = float(v(1.0)) if callable(v) else v  # schedules -> start value
+    return out
 
 
 # --- Callback -----------------------------------------------------------------
@@ -202,6 +242,10 @@ class LeagueCallback(BaseCallback):
                 if prev is None:
                     continue
                 opp_spec, label = f"ppo:{prev}", "prev"
+            elif opp == "init":
+                if not self.cfg.init_from:
+                    continue
+                opp_spec, label = f"ppo:{self.cfg.init_from}", "init"
             else:
                 opp_spec, label = as_spec(opp), opp
             try:
@@ -211,7 +255,7 @@ class LeagueCallback(BaseCallback):
             except FileNotFoundError:
                 continue  # e.g. reference checkpoint not deployed
             results[label] = {
-                "opponent": opp_spec if label == "prev" else opp,
+                "opponent": opp_spec if label in ("prev", "init") else opp,
                 "games": s["games"], "wins": s["a_wins"], "win_rate": s["win_rate_a"],
                 "ci95": s["ci95"], "reward_mean": 2 * s["win_rate_a"] - 1,
                 "points_per_hand": s["a_stats"]["points_per_hand"],
@@ -222,7 +266,7 @@ class LeagueCallback(BaseCallback):
             }
         self._last_eval_ckpt = ckpt
 
-        fixed = [r for k, r in results.items() if k != "prev"]
+        fixed = [r for k, r in results.items() if k not in ("prev", "init")]
         wins = sum(r["wins"] for r in fixed)
         games = sum(r["games"] for r in fixed)
         score = wins / games if games else None
@@ -257,7 +301,8 @@ def _make_env_fn(cfg: TrainConfig, run_dir: Path, rank: int):
     def _init():
         return LeagueEnv(seed=cfg.seed * 1000 + rank, obs_version=cfg.obs_version,
                          league=cfg.league, run_dir=str(run_dir),
-                         max_snapshots=cfg.max_snapshots_in_pool)
+                         max_snapshots=cfg.max_snapshots_in_pool,
+                         extra_snapshots=cfg.extra_snapshots)
     return _init
 
 
@@ -276,14 +321,29 @@ def train_league(cfg: TrainConfig, runs_dir: Optional[Path] = None,
     """Run a full league training; returns the run directory.
 
     ``on_start`` receives the callback before learning starts, so a caller
-    (the API) can read live progress from it.
+    (the API) can read live progress from it. With ``cfg.init_from`` the run
+    continues that checkpoint (``cfg`` is updated to what it really uses).
     """
+    if cfg.init_from:
+        unknown = set(cfg.init_overrides) - set(INIT_OVERRIDABLE)
+        if unknown:
+            raise ValueError(f"Cannot override when continuing: {sorted(unknown)}")
+        cfg.obs_version = checkpoint_obs_version(cfg.init_from)
+        if "init" not in cfg.eval_opponents:
+            cfg.eval_opponents = [*cfg.eval_opponents, "init"]
+        if cfg.inherit_pool and not cfg.extra_snapshots:
+            cfg.extra_snapshots = [str(p) for p in source_snapshots(
+                cfg.init_from, cfg.max_snapshots_in_pool)]
     run_dir = run_dir or new_run_dir(cfg.name, runs_dir or RUNS_DIR)
     started = time.time()
-    _write_json(run_dir / "config.json", {
-        "config": cfg.to_dict(), "seed": cfg.seed, "git": _git_commit(),
-        "versions": _versions(), "started_at": started,
-    })
+
+    def write_config() -> None:
+        _write_json(run_dir / "config.json", {
+            "config": cfg.to_dict(), "seed": cfg.seed, "git": _git_commit(),
+            "versions": _versions(), "started_at": started,
+        })
+
+    write_config()
     run_info: Dict[str, Any] = {
         "id": run_dir.name, "name": cfg.name, "status": "running",
         "started_at": started, "ended_at": None, "timesteps": 0,
@@ -299,7 +359,10 @@ def train_league(cfg: TrainConfig, runs_dir: Optional[Path] = None,
     try:
         kwargs = ppo_kwargs(cfg.hyperparams)
         if cfg.init_from:
-            model = MaskablePPO.load(cfg.init_from, env=env, device="cpu")
+            model = MaskablePPO.load(cfg.init_from, env=env, device="cpu",
+                                     verbose=0, **cfg.init_overrides)
+            cfg.hyperparams = _model_hyperparams(model, cfg.hyperparams)
+            write_config()
         else:
             model = MaskablePPO("MlpPolicy", env, seed=cfg.seed, verbose=0,
                                 device="cpu", **kwargs)
@@ -346,7 +409,11 @@ def main(argv=None) -> int:
     p.add_argument("--eval-workers", type=int, default=d.eval_workers)
     p.add_argument("--n-envs", type=int, default=None)
     p.add_argument("--vec-env", default=d.vec_env, choices=["subproc", "dummy"])
-    p.add_argument("--init-from", default="")
+    p.add_argument("--init-from", default="",
+                   help="continue this checkpoint (its obs version and hyperparameters, "
+                        "unless overridden with --hp)")
+    p.add_argument("--no-inherit-pool", action="store_true",
+                   help="with --init-from, do not add the source run's snapshots to the league")
     p.add_argument("--hp", action="append", default=[], metavar="KEY=VALUE",
                    help="override a HYPERPARAMS entry, e.g. --hp ent_coef=0.01 (repeatable)")
     args = p.parse_args(argv)
@@ -357,6 +424,7 @@ def main(argv=None) -> int:
         eval_every=args.eval_every, eval_games=args.eval_games,
         eval_opponents=args.eval_opponents, eval_workers=args.eval_workers,
         vec_env=args.vec_env, init_from=args.init_from,
+        inherit_pool=not args.no_inherit_pool,
     )
     if args.league:
         cfg.league = _parse_league(args.league)
@@ -367,6 +435,10 @@ def main(argv=None) -> int:
         if key not in cfg.hyperparams:
             p.error(f"unknown hyperparameter: {key}")
         cfg.hyperparams[key] = json.loads(value)
+        if args.init_from:
+            if key not in INIT_OVERRIDABLE:
+                p.error(f"{key} cannot change when continuing a checkpoint")
+            cfg.init_overrides[key] = cfg.hyperparams[key]
 
     def report(m: Dict[str, Any]) -> None:
         ev = "  ".join(f"{k}={v['win_rate']:.1%}" for k, v in m["eval"].items())

@@ -7,7 +7,6 @@ import { GameMenu, EventList, OpponentSelect } from "@/components/game/GameMenu"
 import { MatchEndOverlay } from "@/components/game/MatchEnd";
 import { RulesModal } from "@/components/game/RulesModal";
 import { GameTable, RoundsHistory, nextStakeAfter, type HandToast } from "@/components/game/Table";
-import { useTrucoSounds } from "@/hooks/useTrucoSounds";
 import { continueGame, getArenaPlayers, newGame, nextHand, sendAction } from "@/lib/api";
 import {
   ACTION_ACCEPT,
@@ -18,6 +17,8 @@ import {
   type GameStateDTO,
 } from "@/types/game";
 import type { PlayersList } from "@/types/runs";
+import { detectCues, stakeEvent, type SoundEvent } from "@/lib/sound/cues";
+import { sound } from "@/lib/sound/engine";
 
 const MAX_EVENTS = 60;
 // How long the finished round stays on the table before the AI opens the next.
@@ -45,17 +46,11 @@ export default function PlayPage() {
       .catch(() => setPlayers(null)); // selector falls back to the default level
   }, []);
 
-  const sounds = useTrucoSounds();
-  const stakeSound: Record<number, () => void> = {
-    3: sounds.playTruco,
-    6: sounds.playSeis,
-    9: sounds.playNove,
-    12: sounds.playDoze,
-  };
-  const prevTerminated = useRef(false);
   const prevGameRef = useRef<GameStateDTO | null>(null);
 
-  // Single diff-driven effect: round sounds, hand-end freeze + toast, and
+  useEffect(() => sound.prefetch(), []);
+
+  // Single diff-driven effect: sounds (the AI's moves and every result) and
   // mid-hand event log entries. We compare prev → cur game state once.
   useEffect(() => {
     if (!game) {
@@ -64,6 +59,7 @@ export default function PlayPage() {
     }
     const prev = prevGameRef.current;
     prevGameRef.current = game;
+    sound.playCues(detectCues(prev, game));
     if (!prev) return;
     if (prev.game_id !== game.game_id) {
       setEvents([]);
@@ -78,13 +74,10 @@ export default function PlayPage() {
       const after = curRounds[i]?.result ?? null;
       if (before === null && after !== null) {
         if (after === 0) {
-          sounds.playRoundWin();
           setEvents((es) => [`🎯 Rodada ${i + 1}: Você venceu`, ...es].slice(0, MAX_EVENTS));
         } else if (after === 1) {
-          sounds.playRoundLose();
           setEvents((es) => [`🎯 Rodada ${i + 1}: IA venceu`, ...es].slice(0, MAX_EVENTS));
         } else {
-          sounds.playRoundTie();
           setEvents((es) => [`🤝 Rodada ${i + 1}: Empate`, ...es].slice(0, MAX_EVENTS));
         }
       }
@@ -137,15 +130,7 @@ export default function PlayPage() {
     ) {
       setEvents((es) => [`✅ Truco aceito — vale ${game.stake} pts`, ...es].slice(0, MAX_EVENTS));
     }
-  }, [game, sounds]);
-
-  useEffect(() => {
-    if (game?.terminated && !prevTerminated.current) {
-      if (game.match_winner === 0) sounds.playVitoria();
-      else sounds.playDerrota();
-    }
-    prevTerminated.current = game?.terminated ?? false;
-  }, [game?.terminated, game?.match_winner, sounds]);
+  }, [game]);
 
   // ai_pending: the AI won (or tied while leading) a round and opens the
   // next one. Keep the finished round on the table, then let the AI move.
@@ -171,13 +156,11 @@ export default function PlayPage() {
     setFrozenGame(game);
     if (game.hand_drawn) {
       setHandToast({ message: "Mão empatada — ninguém pontua.", tone: "draw" });
-      sounds.playRoundTie();
     } else {
       setHandToast({
         message: p0Won ? "Você venceu a mão! 🎉" : "IA venceu a mão.",
         tone: p0Won ? "win" : "lose",
       });
-      if (p0Won) sounds.playRoundWin(); else sounds.playRoundLose();
     }
     const id = setTimeout(async () => {
       try {
@@ -205,6 +188,8 @@ export default function PlayPage() {
   }, [frozenGame]);
 
   async function handleNewGame() {
+    sound.unlock();
+    sound.cancel();
     setDismissedMatch(null);
     setError(null);
     setBusy(true);
@@ -219,20 +204,12 @@ export default function PlayPage() {
 
   async function handleAction(action: number) {
     if (!game || busy || frozenGame) return;
-    // Immediate audio feedback before the round-trip.
-    if (action === ACTION_CALL_TRUCO) {
-      const next = nextStakeAfter(game.stake ?? 1);
-      if (next != null) stakeSound[next]?.();
-    } else if (action === ACTION_RAISE) {
-      const base = game.pending_stake ?? game.stake ?? 1;
-      const next = nextStakeAfter(base);
-      if (next != null) stakeSound[next]?.();
-    } else if (action === ACTION_ACCEPT) {
-      sounds.playAceitar();
-    } else if (action === ACTION_RUN) {
-      sounds.playCorrer();
-    } else if (action >= ACTION_PLAY_0 && action <= ACTION_PLAY_0 + 2) {
-      sounds.playCartaJogada();
+    // The human's own move sounds right away, before the round-trip; the
+    // AI's answer sounds when the new state arrives (detectCues).
+    const click = clickSound(game, action);
+    if (click) {
+      sound.unlock();
+      sound.play(click, "p0");
     }
 
     setBusy(true);
@@ -343,6 +320,15 @@ export default function PlayPage() {
 }
 
 const EMPTY = new Set<number>();
+
+function clickSound(game: GameStateDTO, action: number): SoundEvent | null {
+  if (action === ACTION_CALL_TRUCO) return stakeEvent(nextStakeAfter(game.stake ?? 1));
+  if (action === ACTION_RAISE) return stakeEvent(nextStakeAfter(game.pending_stake ?? game.stake ?? 1));
+  if (action === ACTION_ACCEPT) return "accept";
+  if (action === ACTION_RUN) return "run";
+  if (action >= ACTION_PLAY_0 && action <= ACTION_PLAY_0 + 2) return "card";
+  return null;
+}
 
 function StartScreen({
   players,

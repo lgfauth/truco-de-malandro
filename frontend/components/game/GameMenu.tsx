@@ -5,6 +5,8 @@ import { useEffect } from "react";
 
 import type { PlayersList } from "@/types/runs";
 
+import { SoundPanel } from "./SoundControls";
+
 export function OpponentSelect({
   players,
   value,
@@ -137,6 +139,9 @@ export function GameMenu({
           >
             📖 Regras
           </button>
+        </div>
+        <div className="p-4 border-b border-zinc-800">
+          <SoundPanel />
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto p-4">
           <div className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Histórico</div>

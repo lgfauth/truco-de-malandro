@@ -60,6 +60,7 @@ export interface RunSummary {
     eval_games?: number;
     eval_opponents?: string[];
     hyperparams?: Record<string, unknown>;
+    init_from?: string | null;
   };
   git: { commit: string | null; dirty: boolean | null } | null;
   n_metrics: number;

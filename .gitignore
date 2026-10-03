@@ -38,7 +38,9 @@ next-env.d.ts
 
 # --- ML artifacts ---
 # Logs from sb3 / tensorboard. Keep models/ committed (needed at deploy time)
-runs/
+# Anchored: an unanchored "runs/" also hid frontend/app/runs (the Runs pages).
+/runs/
+/backend/runs/
 tb_logs/
 tensorboard/
 wandb/
@@ -55,3 +57,6 @@ Thumbs.db
 .context-mem/
 .claude/
 .cursor/
+
+# Sound build cache (tools/sounds/build_sounds.py)
+tools/sounds/.cache/

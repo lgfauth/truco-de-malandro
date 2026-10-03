@@ -67,6 +67,17 @@ def resolve_spec(value: Optional[str]) -> Tuple[str, str]:
     raise HTTPException(400, f"Unknown player: {value}")
 
 
+def ref_for_path(path: str | Path) -> str:
+    """Absolute checkpoint path -> public reference (inverse of resolve_spec)."""
+    p = Path(path)
+    for root, prefix in ((RUNS_DIR, "runs"), (MODELS_DIR, "models")):
+        try:
+            return f"ppo:{prefix}/{p.resolve().relative_to(root.resolve()).as_posix()}"
+        except ValueError:
+            continue
+    return f"ppo:{p.name}"
+
+
 def label_for(ref: str) -> str:
     for name, (spec, label) in LEVELS.items():
         if ref in (name, spec):

@@ -214,7 +214,29 @@ def test_arena_job_validation(client, jobs_dir):
     assert client.get("/arena/jobs/nope").status_code == 404
 
 
+def test_run_summary_shows_the_source_checkpoint(client, runs_dir):
+    rid = _fake_run(runs_dir)
+    src = runs_dir / rid / "checkpoints" / "step_000000010.zip"
+    conf = runs_dir / rid / "config.json"
+    conf.write_text(json.dumps({"config": {"obs_version": "v2", "init_from": str(src)}, "seed": 0}))
+    run = client.get(f"/runs/{rid}").json()["run"]
+    assert run["config"]["init_from"] == f"ppo:runs/{rid}/checkpoints/step_000000010.zip"
+
+
 # --- training -------------------------------------------------------------------
+@pytest.mark.parametrize("body,status", [
+    ({"init_from": "facil"}, 400),
+    ({"init_from": "py:os:system"}, 400),
+    ({"init_from": "ppo:../secret.zip"}, 400),
+    ({"init_from": "ppo:models/nope.zip"}, 404),
+    ({"init_from_run": "nope"}, 404),
+    ({"learning_rate": 0}, 422),
+])
+def test_training_start_validates_the_source(client, runs_dir, body, status):
+    assert client.post("/train/start", json=body).status_code == status
+
+
+
 def test_training_start_status_and_pause(client, runs_dir, monkeypatch):
     monkeypatch.setattr(agent.train, "RUNS_DIR", runs_dir)
     r = client.post("/train/start", json={"total_timesteps": 4096, "eval_every": 2048,

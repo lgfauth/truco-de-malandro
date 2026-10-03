@@ -40,6 +40,7 @@ const OPPONENT_LABELS: Record<string, string> = {
   random: "Aleatório",
   rule: "Regra",
   prev: "Snapshot anterior",
+  init: "Modelo de origem",
   snapshot: "Snapshots",
   latest: "Mais recente",
   facil: "Fácil",

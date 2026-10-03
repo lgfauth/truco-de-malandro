@@ -73,6 +73,12 @@ export interface StartTrainOptions {
   obs_version?: "v1" | "v2";
   eval_every?: number;
   eval_games?: number;
+  /** Checkpoint to continue (e.g. "ppo:runs/<id>/best.zip"); obs_version then follows it. */
+  init_from?: string;
+  /** With init_from: also train against the source run's snapshots. */
+  inherit_pool?: boolean;
+  learning_rate?: number;
+  ent_coef?: number;
 }
 
 export function startTrain(opts: StartTrainOptions = {}) {

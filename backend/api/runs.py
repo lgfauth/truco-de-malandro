@@ -18,7 +18,7 @@ from fastapi import APIRouter, HTTPException
 
 from agent.train import RUNS_DIR
 
-from .players import list_run_checkpoints
+from .players import list_run_checkpoints, ref_for_path
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -74,6 +74,7 @@ def run_summary(d: Path) -> Dict[str, Any]:
             "eval_games": cfg.get("eval_games"),
             "eval_opponents": cfg.get("eval_opponents"),
             "hyperparams": cfg.get("hyperparams"),
+            "init_from": ref_for_path(cfg["init_from"]) if cfg.get("init_from") else None,
         },
         "git": conf.get("git"),
         "n_metrics": len(metrics),
