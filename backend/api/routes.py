@@ -306,7 +306,15 @@ class TrainStartReq(BaseModel):
     league: Optional[Dict[str, float]] = None
     eval_every: int = Field(default=50_000, ge=2048)
     eval_games: int = Field(default=200, ge=2, le=2000)
+    # Continue a checkpoint instead of starting from scratch: any PPO player
+    # reference (ppo:runs/<id>/best.zip, ppo:models/<file>.zip, a level), or
+    # init_from_run for that run's final.zip. obs_version then follows it.
+    init_from: Optional[str] = None
     init_from_run: Optional[str] = None
+    inherit_pool: bool = True
+    # Replace the default (or, when continuing, the checkpoint's) value.
+    learning_rate: Optional[float] = Field(default=None, gt=0, le=1e-2)
+    ent_coef: Optional[float] = Field(default=None, ge=0, le=0.5)
 
 
 class NewGameReq(BaseModel):
@@ -338,11 +346,23 @@ def train_start(req: TrainStartReq):
                       eval_workers=ARENA_WORKERS, vec_env="dummy")
     if req.league:
         cfg.league = dict(req.league)
-    if req.init_from_run:
+    overrides = {k: v for k, v in (("learning_rate", req.learning_rate),
+                                   ("ent_coef", req.ent_coef)) if v is not None}
+    cfg.hyperparams.update(overrides)
+    if req.init_from:
+        spec, _ = resolve_spec(req.init_from)
+        prefix, _, path = spec.partition(":")
+        if prefix not in ("ppo", "ppo-stoch"):
+            raise HTTPException(400, "init_from must be a PPO checkpoint.")
+        cfg.init_from = path
+    elif req.init_from_run:
         src = run_dir(req.init_from_run) / "final.zip"
         if not src.is_file():
             raise HTTPException(409, "That run has no final.zip to continue from.")
         cfg.init_from = str(src)
+    if cfg.init_from:
+        cfg.init_overrides = overrides
+        cfg.inherit_pool = req.inherit_pool
     with TRAIN.lock:
         if TRAIN.is_alive():
             raise HTTPException(409, "Training already running.")

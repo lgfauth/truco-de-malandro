@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MetricChart, SERIES, opponentColor, type Row } from "@/components/charts";
 import { Button, Card, Empty, ErrorBox, Page, Stat } from "@/components/ui";
 import {
+  getArenaPlayers,
   getRunMetrics,
   getTrainStatus,
   metricsWebSocketUrl,
@@ -15,7 +16,12 @@ import {
 } from "@/lib/api";
 import { duration, pct, playerLabel, steps } from "@/lib/format";
 import type { TrainStatus } from "@/types/game";
-import type { RunMetric } from "@/types/runs";
+import type { PlayersList, RunMetric } from "@/types/runs";
+
+const SELECT_CLASS =
+  "bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 disabled:opacity-60";
+const LEARNING_RATES = [3e-4, 1e-4, 5e-5];
+const ENT_COEFS = [0.01, 0.005, 0.001];
 
 type WSMsg =
   | { type: "metrics"; run_id: string | null; full: RunMetric[] }
@@ -28,6 +34,11 @@ export default function WatchPage() {
   const [error, setError] = useState<string | null>(null);
   const [totalSteps, setTotalSteps] = useState(500_000);
   const [obsVersion, setObsVersion] = useState<"v1" | "v2">("v2");
+  const [players, setPlayers] = useState<PlayersList | null>(null);
+  const [initFrom, setInitFrom] = useState("");
+  const [inheritPool, setInheritPool] = useState(true);
+  const [learningRate, setLearningRate] = useState("");
+  const [entCoef, setEntCoef] = useState("");
   const [busy, setBusy] = useState(false);
   const runIdRef = useRef<string | null>(null);
 
@@ -115,6 +126,30 @@ export default function WatchPage() {
   }));
 
   const running = !!status?.running;
+
+  // Checkpoints a run can continue from; reloaded when a run ends so its
+  // best/final show up.
+  useEffect(() => {
+    if (running) return;
+    getArenaPlayers()
+      .then(setPlayers)
+      .catch(() => {});
+  }, [running]);
+
+  const continuing = initFrom !== "";
+  const fromRun = initFrom.startsWith("ppo:runs/");
+
+  function start() {
+    return startTrain({
+      total_timesteps: totalSteps,
+      obs_version: obsVersion,
+      name: continuing ? "web_cont" : `web_${obsVersion}`,
+      ...(continuing && { init_from: initFrom, inherit_pool: inheritPool }),
+      ...(learningRate && { learning_rate: Number(learningRate) }),
+      ...(entCoef && { ent_coef: Number(entCoef) }),
+    });
+  }
+
   const progress = status?.total_timesteps ? status.timestep / status.total_timesteps : 0;
   const latest = metrics[metrics.length - 1];
 
@@ -132,12 +167,37 @@ export default function WatchPage() {
       <Card title="Controle">
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            Partir de
+            <select
+              value={initFrom}
+              onChange={(e) => setInitFrom(e.target.value)}
+              disabled={running}
+              className={SELECT_CLASS}
+            >
+              <option value="">Do zero</option>
+              {players && players.models.length > 0 && (
+                <optgroup label="Modelos publicados">
+                  {players.models.map((m) => (
+                    <option key={m.ref} value={m.ref}>{m.label}</option>
+                  ))}
+                </optgroup>
+              )}
+              {players?.runs.map((r) => (
+                <optgroup key={r.run_id} label={r.run_id}>
+                  {r.checkpoints.map((c) => (
+                    <option key={c.ref} value={c.ref}>{c.name}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
             Passos
             <select
               value={totalSteps}
               onChange={(e) => setTotalSteps(Number(e.target.value))}
               disabled={running}
-              className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100"
+              className={SELECT_CLASS}
             >
               {[100_000, 500_000, 1_000_000, 3_000_000].map((n) => (
                 <option key={n} value={n}>{steps(n)}</option>
@@ -149,19 +209,59 @@ export default function WatchPage() {
             <select
               value={obsVersion}
               onChange={(e) => setObsVersion(e.target.value as "v1" | "v2")}
-              disabled={running}
-              className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100"
+              disabled={running || continuing}
+              title={continuing ? "Segue a observação do modelo de origem" : undefined}
+              className={SELECT_CLASS}
             >
-              <option value="v2">v2 (força, manilha, histórico)</option>
-              <option value="v1">v1 (original)</option>
+              <option value="v2">{continuing ? "a do modelo" : "v2 (força, manilha, histórico)"}</option>
+              {!continuing && <option value="v1">v1 (original)</option>}
             </select>
           </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            Learning rate
+            <select
+              value={learningRate}
+              onChange={(e) => setLearningRate(e.target.value)}
+              disabled={running}
+              className={SELECT_CLASS}
+            >
+              <option value="">{continuing ? "o do modelo" : "padrão (3e-4)"}</option>
+              {LEARNING_RATES.map((v) => (
+                <option key={v} value={v}>{v.toExponential(0)}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            Entropia
+            <select
+              value={entCoef}
+              onChange={(e) => setEntCoef(e.target.value)}
+              disabled={running}
+              className={SELECT_CLASS}
+            >
+              <option value="">{continuing ? "a do modelo" : "padrão (0.01)"}</option>
+              {ENT_COEFS.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          </label>
+          {fromRun && (
+            <label className="flex items-center gap-2 text-xs text-zinc-400 pb-2">
+              <input
+                type="checkbox"
+                checked={inheritPool}
+                onChange={(e) => setInheritPool(e.target.checked)}
+                disabled={running}
+              />
+              Herdar snapshots da run
+            </label>
+          )}
           <Button
             tone="emerald"
             disabled={running || busy}
-            onClick={() => act(() => startTrain({ total_timesteps: totalSteps, obs_version: obsVersion, name: `web_${obsVersion}` }))}
+            onClick={() => act(start)}
           >
-            Iniciar treino
+            {continuing ? "Continuar treino" : "Iniciar treino"}
           </Button>
           <Button tone="amber" disabled={!running || busy} onClick={() => act(pauseTrain)}>
             Parar
@@ -180,6 +280,13 @@ export default function WatchPage() {
             Limpar
           </Button>
         </div>
+        {continuing && (
+          <p className="text-xs text-zinc-500 mt-2">
+            Continuar cria uma run nova a partir dos pesos escolhidos; a origem não é alterada e entra
+            na avaliação como &quot;Modelo de origem&quot;. Para ajuste fino, um learning rate menor
+            (1e-4) costuma ser mais estável.
+          </p>
+        )}
         <p className="text-xs text-zinc-500 mt-2">
           Parar encerra a run e salva o modelo (final.zip); Limpar só esquece o estado desta tela —
           as runs continuam em <Link href="/runs" className="underline">Runs</Link>.

@@ -3,7 +3,8 @@
 Pool kinds (weights in :data:`agent.config.DEFAULT_LEAGUE`):
     random     uniform legal actions
     rule       :class:`arena.players.RulePlayer`
-    snapshot   an earlier checkpoint of the agent (``<run>/checkpoints/*.zip``)
+    snapshot   an earlier checkpoint of the agent (``<run>/checkpoints/*.zip``,
+               after any snapshots inherited from the run it continues)
     latest     the agent's most recent weights (``<run>/latest.zip``)
 
 Checkpoints are exchanged through files so the same env works in-process
@@ -17,7 +18,7 @@ from __future__ import annotations
 import os
 import random
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import gymnasium as gym
 import numpy as np
@@ -50,13 +51,15 @@ class OpponentPool:
     """Samples an opponent kind by weight and builds/caches the player."""
 
     def __init__(self, weights: Dict[str, float], run_dir: Optional[Path],
-                 max_snapshots: int = 20) -> None:
+                 max_snapshots: int = 20,
+                 extra_snapshots: Sequence[str | Path] = ()) -> None:
         unknown = set(weights) - {"random", "rule", "snapshot", "latest"}
         if unknown:
             raise ValueError(f"Unknown league entries: {sorted(unknown)}")
         self.weights = {k: float(v) for k, v in weights.items() if v > 0}
         self.run_dir = run_dir
         self.max_snapshots = max_snapshots
+        self.extra_snapshots = [Path(p) for p in extra_snapshots if Path(p).is_file()]
         self._random = RandomPlayer()
         self._rule = RulePlayer()
         # path -> (mtime, player)
@@ -86,16 +89,19 @@ class OpponentPool:
                 self._models.pop(oldest)
         return player
 
+    def _snapshots(self) -> List[Path]:
+        own = list_snapshots(self.run_dir) if self.run_dir is not None else []
+        return (self.extra_snapshots + own)[-self.max_snapshots:]
+
     def _available(self) -> Dict[str, float]:
         avail = {}
         for kind, w in self.weights.items():
             if kind in ("random", "rule"):
                 avail[kind] = w
-            elif self.run_dir is None:
-                continue
-            elif kind == "latest" and (self.run_dir / LATEST_NAME).exists():
+            elif (kind == "latest" and self.run_dir is not None
+                  and (self.run_dir / LATEST_NAME).exists()):
                 avail[kind] = w
-            elif kind == "snapshot" and list_snapshots(self.run_dir):
+            elif kind == "snapshot" and self._snapshots():
                 avail[kind] = w
         return avail or {"random": 1.0}
 
@@ -111,8 +117,7 @@ class OpponentPool:
         elif kind == "latest":
             player = self._load(self.run_dir / LATEST_NAME)
         elif kind == "snapshot":
-            snaps = list_snapshots(self.run_dir)[-self.max_snapshots:]
-            player = self._load(rng.choice(snaps))
+            player = self._load(rng.choice(self._snapshots()))
         if player is None:
             kind, player = "random", self._random
         return kind, player
@@ -126,11 +131,13 @@ class LeagueEnv(gym.Env):
     def __init__(self, seed: Optional[int] = None, obs_version: str = "v2",
                  league: Optional[Dict[str, float]] = None,
                  run_dir: Optional[str | Path] = None,
-                 max_snapshots: int = 20) -> None:
+                 max_snapshots: int = 20,
+                 extra_snapshots: Sequence[str | Path] = ()) -> None:
         super().__init__()
         self.obs_version = obs_version
         self.pool = OpponentPool(league or {"random": 1.0},
-                                 Path(run_dir) if run_dir else None, max_snapshots)
+                                 Path(run_dir) if run_dir else None, max_snapshots,
+                                 extra_snapshots)
         self._init_seed = seed
         self._seeded = False
         self._rng = random.Random()

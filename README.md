@@ -136,6 +136,18 @@ python -m agent.train --hp ent_coef=0.01 --hp learning_rate=0.0001
 python -m agent.train --help
 ```
 
+### Continuar um modelo
+
+Um treino não precisa começar do zero: com `--init-from` (ou "Partir de" na tela de treino) a run nova carrega os pesos de um checkpoint e segue treinando. A origem não é alterada; o resultado é uma run nova, comparável na arena.
+
+```bash
+python -m agent.train --name liga_v2_cont --steps 2000000   --init-from models/truco_liga_v2.zip --hp learning_rate=0.0001
+```
+
+- A observação (v1/v2) e os hiperparâmetros vêm do zip. `--hp` (ou `learning_rate`/`ent_coef` na API) substitui só o que for informado; para ajuste fino, um learning rate menor (1e-4) costuma ser mais estável. `net_arch` não muda.
+- Se a origem é de uma run, os snapshots dela entram no pool da liga (`--no-inherit-pool` desliga), então a IA continua apanhando das versões antigas dela mesma.
+- A avaliação ganha o oponente "Modelo de origem" (`init`), que mostra se a continuação ficou mais forte que o ponto de partida. Ele fica fora do `eval_score`, para o score continuar comparável entre runs.
+
 Com 8 envs, o treino faz cerca de 2 000 passos/s numa CPU de desktop, avaliações incluídas. 3M de passos levam uns 30 minutos: dá tempo de jogar umas mãos enquanto isso.
 
 ### Runs
@@ -234,7 +246,7 @@ Estão em `tests/test_arena.py`: aleatório contra aleatório fica perto de 50%,
 
 | Método | Endpoint | Descrição |
 |---|---|---|
-| `POST` | `/train/start` | Treino em liga numa thread do servidor: `{ total_timesteps, name, obs_version, league?, eval_every, eval_games, init_from_run? }` |
+| `POST` | `/train/start` | Treino em liga numa thread do servidor: `{ total_timesteps, name, obs_version, league?, eval_every, eval_games, init_from?, init_from_run?, inherit_pool?, learning_rate?, ent_coef? }`. `init_from` é qualquer checkpoint PPO (`ppo:runs/<id>/best.zip`, `ppo:models/<arquivo>.zip`, um nível); `init_from_run` usa o `final.zip` daquela run |
 | `POST` | `/train/pause` | Encerra a run (status `stopped`, salva `final.zip`) |
 | `POST` | `/train/reset` | Encerra e limpa o estado em memória (as runs em disco ficam) |
 | `GET` | `/train/status` | `running`, `run_id`, `timestep`, `latest_metric` (formato antigo) e `latest` (métrica completa) |

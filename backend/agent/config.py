@@ -42,7 +42,9 @@ DEFAULT_LEAGUE: Dict[str, float] = {
 }
 
 # Fixed evaluation opponents. "prev" is the snapshot saved just before the
-# checkpoint under evaluation.
+# checkpoint under evaluation. A run continued from a checkpoint also plays
+# "init" (that checkpoint). Neither counts towards the eval score, so scores
+# stay comparable across runs.
 DEFAULT_EVAL_OPPONENTS: List[str] = ["random", "rule", "prev", "ppo:truco_ppo_1M"]
 
 
@@ -63,7 +65,14 @@ class TrainConfig:
     eval_opponents: List[str] = field(default_factory=lambda: list(DEFAULT_EVAL_OPPONENTS))
     eval_workers: int = 4
     vec_env: str = "subproc"          # "subproc" (CLI) or "dummy" (in-process)
-    init_from: str = ""               # optional checkpoint to continue from
+    # Continuing a checkpoint: the observation version and hyperparameters
+    # come from the zip; init_overrides replaces some of the latter (e.g. a
+    # lower learning_rate for fine-tuning). With inherit_pool the league also
+    # samples the source run's snapshots (extra_snapshots, filled at start).
+    init_from: str = ""
+    init_overrides: Dict[str, Any] = field(default_factory=dict)
+    inherit_pool: bool = True
+    extra_snapshots: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -76,6 +85,11 @@ class TrainConfig:
         merged.update(cfg.hyperparams or {})
         cfg.hyperparams = merged
         return cfg
+
+
+# Hyperparameters that may replace a checkpoint's own when continuing it.
+# net_arch is fixed by the weights and n_envs by the training env.
+INIT_OVERRIDABLE = tuple(k for k in HYPERPARAMS if k not in ("n_envs", "net_arch"))
 
 
 def ppo_kwargs(hp: Dict[str, Any]) -> Dict[str, Any]:
