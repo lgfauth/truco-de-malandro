@@ -235,6 +235,18 @@ def test_run_summary_shows_the_source_checkpoint(client, runs_dir):
 def test_training_start_validates_the_source(client, runs_dir, body, status):
     assert client.post("/train/start", json=body).status_code == status
 
+def test_status_before_learning_starts(client, tmp_path, monkeypatch):
+    # The API gets the callback before learn() sets its ``model``; a training
+    # that fails in that window must still report its error.
+    from agent.config import TrainConfig
+    from agent.train import LeagueCallback
+
+    cb = LeagueCallback(TrainConfig(), tmp_path, {})
+    monkeypatch.setattr(api.routes.TRAIN, "callback", cb)
+    monkeypatch.setattr(api.routes.TRAIN, "error", "RuntimeError: boom")
+    r = client.get("/train/status")
+    assert r.status_code == 200
+    assert r.json()["timestep"] == 0 and r.json()["error"] == "RuntimeError: boom"
 
 
 def test_training_start_status_and_pause(client, runs_dir, monkeypatch):
