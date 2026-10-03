@@ -58,9 +58,6 @@ Thumbs.db
 .claude/
 .cursor/
 
-<<<<<<< HEAD
 # Sound build cache (tools/sounds/build_sounds.py)
 tools/sounds/.cache/
-=======
 log.txt
->>>>>>> fix/train-status
