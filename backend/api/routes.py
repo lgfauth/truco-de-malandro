@@ -396,7 +396,9 @@ def _status_payload() -> dict:
         "running": TRAIN.is_alive(),
         "paused": TRAIN.paused and not TRAIN.is_alive(),
         "run_id": TRAIN.run_id,
-        "timestep": int(cb.num_timesteps) if cb is not None and cb.model is not None else 0,
+        # num_timesteps exists from the callback's construction; ``model`` only
+        # once learn() initializes it, which recent SB3 no longer pre-sets.
+        "timestep": int(cb.num_timesteps) if cb is not None else 0,
         "total_timesteps": TRAIN.total_timesteps,
         "episode": cb.episodes if cb is not None else 0,
         "error": TRAIN.error,

@@ -215,6 +215,20 @@ def test_arena_job_validation(client, jobs_dir):
 
 
 # --- training -------------------------------------------------------------------
+def test_status_before_learning_starts(client, tmp_path, monkeypatch):
+    # The API gets the callback before learn() sets its ``model``; a training
+    # that fails in that window must still report its error.
+    from agent.config import TrainConfig
+    from agent.train import LeagueCallback
+
+    cb = LeagueCallback(TrainConfig(), tmp_path, {})
+    monkeypatch.setattr(api.routes.TRAIN, "callback", cb)
+    monkeypatch.setattr(api.routes.TRAIN, "error", "RuntimeError: boom")
+    r = client.get("/train/status")
+    assert r.status_code == 200
+    assert r.json()["timestep"] == 0 and r.json()["error"] == "RuntimeError: boom"
+
+
 def test_training_start_status_and_pause(client, runs_dir, monkeypatch):
     monkeypatch.setattr(agent.train, "RUNS_DIR", runs_dir)
     r = client.post("/train/start", json={"total_timesteps": 4096, "eval_every": 2048,
