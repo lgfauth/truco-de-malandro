@@ -76,12 +76,14 @@ truco-de-malandro/
 │   ├── models/                 # Checkpoints publicados (truco_liga_v2.zip é o de produção)
 │   └── tests/                  # pytest
 ├── docs/images/                # Screenshots deste README
+├── tools/sounds/               # Gerador dos sons da mesa (efeitos + vozes)
 └── frontend/
     ├── app/                    # /, /play, /watch, /runs, /runs/[id], /arena
     ├── components/             # ui.tsx, charts.tsx, arena.tsx, game/
     ├── lib/                    # api.ts, format.ts, elo.ts
+    │   └── sound/              # Sons da mesa: eventos (cues), síntese, motor e vozes
     ├── types/                  # game.ts, runs.ts
-    └── hooks/useTrucoSounds.ts
+    └── hooks/useSoundSettings.ts
 ```
 
 ---
@@ -281,6 +283,19 @@ Estão em `tests/test_arena.py`: aleatório contra aleatório fica perto de 50%,
   - força por passo (conjunto fixo e Elo ajustado com o aleatório em 0);
   - matriz de confrontos, com um botão para avaliar qualquer checkpoint contra outro oponente.
 - **`/arena`**: escolha dois jogadores, o número de partidas e a semente. Acompanhe o progresso e veja o resultado com IC e as estatísticas por lado.
+
+### Sons da mesa
+
+Carta na mesa, embaralhar, batidas no truco, fichas na mão ganha e a voz de cada lado ("Truco, patinho!", "Cai dentro!") saem de `frontend/public/sounds/`. Os efeitos são dos pacotes CC0 do [Kenney](https://kenney.nl), e as vozes são sintetizadas com o [Piper](https://github.com/OHF-Voice/piper1-gpl) (pt-BR). Os créditos ficam em [`CREDITS.md`](frontend/public/sounds/CREDITS.md). Volume, mudo e vozes ficam no menu da partida.
+
+Para trocar falas ou efeitos, edite `SFX`/`LINES` em [`tools/sounds/build_sounds.py`](tools/sounds/build_sounds.py) e gere de novo. Ele baixa as fontes, mixa, normaliza e reescreve os MP3 e o `frontend/lib/sound/manifest.ts`:
+
+```bash
+pip install -r tools/sounds/requirements.txt
+python tools/sounds/build_sounds.py
+```
+
+Evento sem arquivo cai na síntese do navegador (`frontend/lib/sound/synth.ts`).
 
 ---
 
