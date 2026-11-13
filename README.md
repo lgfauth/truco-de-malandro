@@ -23,6 +23,8 @@
 
 Senta, embaralha e se prepara: aqui o adversário é um agente de **aprendizado por reforço** que joga **Truco Paulista** *heads-up* (1 vs 1). Ele foi criado com **MaskablePPO** (só tenta jogadas legais, nada de esconder carta na manga), treinado numa **liga de oponentes** que inclui versões antigas dele mesmo, testado numa **arena** com intervalo de confiança e servido por API REST + WebSocket.
 
+Jogue por aqui: https://truco-malandro.up.railway.app/play
+
 No frontend dá pra ver o bicho aprendendo, botar modelos pra se enfrentarem e, claro, sentar na mesa e tomar um truco na cara.
 
 ---
